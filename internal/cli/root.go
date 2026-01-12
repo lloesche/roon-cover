@@ -75,6 +75,7 @@ func newRootCmd(ctx context.Context) *cobra.Command {
 
 	cmd.AddCommand(newVersionCmd())
 	cmd.AddCommand(newRoonCmd())
+	cmd.AddCommand(newDisplayCmd())
 
 	cmd.SetOut(os.Stdout)
 	cmd.SetErr(os.Stderr)
