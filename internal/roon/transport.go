@@ -21,6 +21,7 @@ type zoneID struct {
 type zoneRaw struct {
 	ZoneID      string         `json:"zone_id"`
 	DisplayName string         `json:"display_name"`
+	State       string         `json:"state"`
 	NowPlaying  *nowPlayingRaw `json:"now_playing"`
 }
 
@@ -188,8 +189,9 @@ func (c *Client) GetZones(ctx context.Context, core Core) ([]Zone, error) {
 
 func mapZone(z zoneRaw) Zone {
 	out := Zone{
-		ID:   ZoneID(z.ZoneID),
-		Name: z.DisplayName,
+		ID:    ZoneID(z.ZoneID),
+		Name:  z.DisplayName,
+		State: ZoneState(z.State),
 	}
 
 	if z.NowPlaying == nil {

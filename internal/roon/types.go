@@ -4,6 +4,15 @@ type CoreID string
 type ZoneID string
 type ImageKey string
 
+type ZoneState string
+
+const (
+	ZoneStatePlaying ZoneState = "playing"
+	ZoneStatePaused  ZoneState = "paused"
+	ZoneStateLoading ZoneState = "loading"
+	ZoneStateStopped ZoneState = "stopped"
+)
+
 type Core struct {
 	ID   CoreID
 	Name string
@@ -16,6 +25,7 @@ type Zone struct {
 	ID   ZoneID
 	Name string
 
+	State      ZoneState
 	NowPlaying *NowPlaying
 }
 

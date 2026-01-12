@@ -31,6 +31,8 @@ func newRoonZonesCmd() *cobra.Command {
 			zoneFilter := strings.TrimSpace(viper.GetString("roon.zone"))
 			downloadToTemp := viper.GetBool("download.to_temp")
 			var lastKey roon.ImageKey
+			var lastDownloaded roon.ImageKey
+			var lastState roon.ZoneState
 
 			if !watch {
 				zones, err := client.GetZones(cmd.Context(), core)
@@ -52,13 +54,25 @@ func newRoonZonesCmd() *cobra.Command {
 						continue
 					}
 					if z.NowPlaying != nil {
-						_, _ = fmt.Fprintf(cmd.OutOrStdout(), "%s: %s — %s (image_key=%s)\n", z.Name, z.NowPlaying.Artist, z.NowPlaying.Title, z.NowPlaying.ImageKey)
-						if downloadToTemp && z.NowPlaying.ImageKey != "" && z.NowPlaying.ImageKey != lastKey {
-							lastKey = z.NowPlaying.ImageKey
-							maybeDownloadCoverToTemp(cmd.Context(), l, client, core, z)
+						_, _ = fmt.Fprintf(cmd.OutOrStdout(), "%s [%s]: %s — %s (image_key=%s)\n", z.Name, z.State, z.NowPlaying.Artist, z.NowPlaying.Title, z.NowPlaying.ImageKey)
+
+						if downloadToTemp {
+							key := z.NowPlaying.ImageKey
+							if key != "" {
+								justStartedPlaying := lastState != roon.ZoneStatePlaying && z.State == roon.ZoneStatePlaying
+								keyChanged := key != lastKey
+								shouldDownload := (z.State == roon.ZoneStatePlaying) && (justStartedPlaying || keyChanged) && key != lastDownloaded
+								if shouldDownload {
+									lastDownloaded = key
+									maybeDownloadCoverToTemp(cmd.Context(), l, client, core, z)
+								}
+								lastKey = key
+							}
+							lastState = z.State
 						}
 					} else {
-						_, _ = fmt.Fprintf(cmd.OutOrStdout(), "%s: (no now playing)\n", z.Name)
+						_, _ = fmt.Fprintf(cmd.OutOrStdout(), "%s [%s]: (no now playing)\n", z.Name, z.State)
+						lastState = z.State
 					}
 				}
 				return nil
