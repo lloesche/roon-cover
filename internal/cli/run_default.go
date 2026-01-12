@@ -65,7 +65,11 @@ func runDefault(cmd *cobra.Command) error {
 	}
 
 	l.Info("subscribing to zone", "zone", zoneName)
+	downloadToTemp := viper.GetBool("download.to_temp")
+	var lastKey roon.ImageKey
+
 	return client.SubscribeZones(ctx, core, func(update roon.ZoneUpdate) error {
+
 		// For now, we just filter by name and print now playing summaries.
 		// Later: detect track/image_key changes and trigger image fetch + render.
 		for _, z := range update.Zones {
@@ -79,6 +83,11 @@ func runDefault(cmd *cobra.Command) error {
 			}
 
 			_, _ = fmt.Fprintf(cmd.OutOrStdout(), "%s: %s — %s (image_key=%s)\n", z.Name, z.NowPlaying.Artist, z.NowPlaying.Title, z.NowPlaying.ImageKey)
+
+			if downloadToTemp && z.NowPlaying.ImageKey != "" && z.NowPlaying.ImageKey != lastKey {
+				lastKey = z.NowPlaying.ImageKey
+				maybeDownloadCoverToTemp(ctx, l, client, core, z)
+			}
 			return nil
 		}
 		return nil

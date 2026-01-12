@@ -29,6 +29,8 @@ func newRoonZonesCmd() *cobra.Command {
 			}
 
 			zoneFilter := strings.TrimSpace(viper.GetString("roon.zone"))
+			downloadToTemp := viper.GetBool("download.to_temp")
+			var lastKey roon.ImageKey
 
 			if !watch {
 				zones, err := client.GetZones(cmd.Context(), core)
@@ -51,6 +53,10 @@ func newRoonZonesCmd() *cobra.Command {
 					}
 					if z.NowPlaying != nil {
 						_, _ = fmt.Fprintf(cmd.OutOrStdout(), "%s: %s — %s (image_key=%s)\n", z.Name, z.NowPlaying.Artist, z.NowPlaying.Title, z.NowPlaying.ImageKey)
+						if downloadToTemp && z.NowPlaying.ImageKey != "" && z.NowPlaying.ImageKey != lastKey {
+							lastKey = z.NowPlaying.ImageKey
+							maybeDownloadCoverToTemp(cmd.Context(), l, client, core, z)
+						}
 					} else {
 						_, _ = fmt.Fprintf(cmd.OutOrStdout(), "%s: (no now playing)\n", z.Name)
 					}

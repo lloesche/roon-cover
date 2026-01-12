@@ -23,7 +23,7 @@ type rootFlags struct {
 	CoreName string
 	ZoneName string
 
-	PprofAddr string
+	PprofAddr      string
 	DownloadToTemp bool
 }
 
