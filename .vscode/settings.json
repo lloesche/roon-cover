@@ -1,9 +1,0 @@
-{
-    // This repo uses build tags (notably `sdl`) to keep SDL/SDL_ttf optional.
-    // Configure gopls to analyze the SDL build so tagged files resolve correctly.
-    "gopls": {
-        "buildFlags": [
-            "-tags=sdl"
-        ]
-    }
-}
