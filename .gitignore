@@ -1,0 +1,40 @@
+# Go build artifacts
+*.exe
+*.dll
+*.so
+*.dylib
+*.test
+*.out
+
+# Coverage / profiling outputs
+coverage.out
+coverage.txt
+*.coverprofile
+*.prof
+cpu.prof
+mem.prof
+
+# Binaries / build dirs (common conventions)
+bin/
+dist/
+build/
+
+# Go workspace / tooling
+.env
+.env.*
+
+# Editors / IDEs
+.idea/
+*.iml
+
+# Keep VS Code settings we commit (for gopls build tags), ignore the rest.
+.vscode/*
+!.vscode/settings.json
+!.vscode/extensions.json
+!.vscode/launch.json
+!.vscode/tasks.json
+
+# OS files
+.DS_Store
+Thumbs.db
+
