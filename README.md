@@ -72,6 +72,8 @@ Key flags:
 - `--roon-zone` / `ROON_COVER_ROON_ZONE`
 - `--display` (SDL display index, 0-based)
 - `--window` (800x800 windowed instead of fullscreen)
+- `--fade-ms` (crossfade duration for cover changes; 0 disables)
+- `--ease` (easing function name for fades)
 - `--download-to-temp` (write latest cover to temp dir for debugging)
 - `--log-level`, `--log-format`
 - `--pprof-addr` (optional local profiling server)

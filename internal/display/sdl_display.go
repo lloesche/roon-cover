@@ -10,6 +10,8 @@ import (
 	"image/draw"
 	_ "image/jpeg"
 	_ "image/png"
+	"math"
+	"strings"
 	"time"
 	"unsafe"
 
@@ -23,9 +25,26 @@ type SDLDisplay struct {
 	Fullscreen   bool
 	DisplayIndex int
 	InfoCh       chan<- ScreenInfo
+	FadeMS       int
+	Ease         string
 }
 
 func (d *SDLDisplay) Run(ctx context.Context, updates <-chan Update) error {
+	fadeMS := d.FadeMS
+	if fadeMS < 0 {
+		return errors.New("display: fade-ms must be >= 0")
+	}
+	fadeDur := time.Duration(fadeMS) * time.Millisecond
+
+	easeName := strings.TrimSpace(d.Ease)
+	if easeName == "" {
+		easeName = "in-out-sine"
+	}
+	ease, err := EasingByName(easeName)
+	if err != nil {
+		return err
+	}
+
 	w := d.Width
 	h := d.Height
 	if w <= 0 {
@@ -85,6 +104,15 @@ func (d *SDLDisplay) Run(ctx context.Context, updates <-chan Update) error {
 	}
 	defer win.Destroy()
 
+	// Cursor behavior: hide only when running fullscreen and the window is focused.
+	// Always ensure we restore cursor visibility on exit.
+	defer sdl.ShowCursor(sdl.ENABLE)
+	if d.Fullscreen {
+		sdl.ShowCursor(sdl.DISABLE)
+	} else {
+		sdl.ShowCursor(sdl.ENABLE)
+	}
+
 	// Place the window on the chosen display before entering fullscreen.
 	// (In windowed mode, this still picks the right screen.)
 	if bounds.X != sdl.WINDOWPOS_CENTERED && bounds.Y != sdl.WINDOWPOS_CENTERED {
@@ -121,14 +149,32 @@ func (d *SDLDisplay) Run(ctx context.Context, updates <-chan Update) error {
 	// Report initial output size (important for choosing cover fetch size).
 	reportOutputSize()
 
-	var tex *sdl.Texture
+	var currTex *sdl.Texture
+	var prevTex *sdl.Texture
 	defer func() {
-		if tex != nil {
-			tex.Destroy()
+		if currTex != nil {
+			currTex.Destroy()
+		}
+		if prevTex != nil {
+			prevTex.Destroy()
 		}
 	}()
 
-	var texW, texH int32
+	var currW, currH int32
+	var prevW, prevH int32
+
+	var fading bool
+	var fadeStart time.Time
+
+	alphaU8 := func(v float64) uint8 {
+		if v <= 0 {
+			return 0
+		}
+		if v >= 1 {
+			return 255
+		}
+		return uint8(math.Round(v * 255))
+	}
 
 	render := func() error {
 		ww, wh, err := ren.GetOutputSize()
@@ -142,9 +188,22 @@ func (d *SDLDisplay) Run(ctx context.Context, updates <-chan Update) error {
 			return err
 		}
 
-		if tex != nil {
-			dst := fitRect(texW, texH, int32(ww), int32(wh))
-			if err := ren.Copy(tex, nil, &dst); err != nil {
+		drawTex := func(tex *sdl.Texture, tw, th int32) error {
+			if tex == nil {
+				return nil
+			}
+			dst := fitRect(tw, th, int32(ww), int32(wh))
+			return ren.Copy(tex, nil, &dst)
+		}
+
+		// Draw prev first, then curr on top (during fades).
+		if prevTex != nil {
+			if err := drawTex(prevTex, prevW, prevH); err != nil {
+				return err
+			}
+		}
+		if currTex != nil {
+			if err := drawTex(currTex, currW, currH); err != nil {
 				return err
 			}
 		}
@@ -180,26 +239,54 @@ func (d *SDLDisplay) Run(ctx context.Context, updates <-chan Update) error {
 				rgba := image.NewRGBA(img.Bounds())
 				draw.Draw(rgba, rgba.Bounds(), img, img.Bounds().Min, draw.Src)
 
-				if tex != nil {
-					tex.Destroy()
-					tex = nil
-				}
-
-				texW = int32(rgba.Bounds().Dx())
-				texH = int32(rgba.Bounds().Dy())
-
-				tex, err = ren.CreateTexture(sdl.PIXELFORMAT_ABGR8888, sdl.TEXTUREACCESS_STATIC, texW, texH)
+				// Build a new texture for this frame.
+				newW := int32(rgba.Bounds().Dx())
+				newH := int32(rgba.Bounds().Dy())
+				newTex, err := ren.CreateTexture(sdl.PIXELFORMAT_ABGR8888, sdl.TEXTUREACCESS_STATIC, newW, newH)
 				if err != nil {
 					return err
 				}
-				_ = tex.SetBlendMode(sdl.BLENDMODE_BLEND)
+				_ = newTex.SetBlendMode(sdl.BLENDMODE_BLEND)
 
 				pitch := rgba.Stride
 				if len(rgba.Pix) == 0 {
+					newTex.Destroy()
 					return errors.New("decoded image has no pixel data")
 				}
-				if err := tex.Update(nil, unsafe.Pointer(&rgba.Pix[0]), pitch); err != nil {
+				if err := newTex.Update(nil, unsafe.Pointer(&rgba.Pix[0]), pitch); err != nil {
+					newTex.Destroy()
 					return err
+				}
+
+				// Install texture (optionally crossfading).
+				if u.NoFade || fadeDur <= 0 || currTex == nil {
+					if prevTex != nil {
+						prevTex.Destroy()
+						prevTex = nil
+					}
+					if currTex != nil {
+						currTex.Destroy()
+						currTex = nil
+					}
+					currTex = newTex
+					currW, currH = newW, newH
+					_ = currTex.SetAlphaMod(255)
+					fading = false
+				} else {
+					// If a previous fade is in-flight, discard the older prevTex to avoid leaks.
+					if prevTex != nil {
+						prevTex.Destroy()
+						prevTex = nil
+					}
+					prevTex, prevW, prevH = currTex, currW, currH
+					currTex, currW, currH = newTex, newW, newH
+
+					// Reset alpha mods for a clean crossfade.
+					_ = prevTex.SetAlphaMod(255)
+					_ = currTex.SetAlphaMod(0)
+
+					fadeStart = time.Now()
+					fading = true
 				}
 
 				if err := render(); err != nil {
@@ -211,6 +298,27 @@ func (d *SDLDisplay) Run(ctx context.Context, updates <-chan Update) error {
 			// u.NowPlaying already contains the fields we need.
 
 		case <-eventsTick.C:
+			// Progress fade (if active).
+			if fading && fadeDur > 0 && prevTex != nil && currTex != nil {
+				t := float64(time.Since(fadeStart)) / float64(fadeDur)
+				if t >= 1 {
+					fading = false
+					prevTex.Destroy()
+					prevTex = nil
+					_ = currTex.SetAlphaMod(255)
+					if err := render(); err != nil {
+						return err
+					}
+				} else {
+					e := clamp01(ease(t))
+					_ = prevTex.SetAlphaMod(alphaU8(1 - e))
+					_ = currTex.SetAlphaMod(alphaU8(e))
+					if err := render(); err != nil {
+						return err
+					}
+				}
+			}
+
 			for {
 				e := sdl.PollEvent()
 				if e == nil {
@@ -223,8 +331,21 @@ func (d *SDLDisplay) Run(ctx context.Context, updates <-chan Update) error {
 					we := e.(*sdl.WindowEvent)
 					// Keep output-size info up to date (window resize, display changes, etc.).
 					switch we.Event {
+					case sdl.WINDOWEVENT_FOCUS_GAINED:
+						if d.Fullscreen {
+							sdl.ShowCursor(sdl.DISABLE)
+						} else {
+							sdl.ShowCursor(sdl.ENABLE)
+						}
+					case sdl.WINDOWEVENT_FOCUS_LOST:
+						// When not focused, allow cursor to be visible.
+						sdl.ShowCursor(sdl.ENABLE)
 					case sdl.WINDOWEVENT_RESIZED, sdl.WINDOWEVENT_SIZE_CHANGED, sdl.WINDOWEVENT_DISPLAY_CHANGED:
 						reportOutputSize()
+						// Ensure the current texture is repainted at the new size.
+						if err := render(); err != nil {
+							return err
+						}
 					}
 				}
 			}

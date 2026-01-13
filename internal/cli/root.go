@@ -27,6 +27,8 @@ type rootFlags struct {
 	DownloadToTemp bool
 	Window         bool
 	DisplayIndex   int
+	FadeMS         int
+	Ease           string
 }
 
 func newRootCmd(ctx context.Context) *cobra.Command {
@@ -69,6 +71,8 @@ func newRootCmd(ctx context.Context) *cobra.Command {
 	cmd.PersistentFlags().BoolVar(&flags.DownloadToTemp, "download-to-temp", false, "download cover art into the OS temp directory and log the file path")
 	cmd.PersistentFlags().BoolVar(&flags.Window, "window", false, "run windowed (800x800) instead of fullscreen")
 	cmd.PersistentFlags().IntVar(&flags.DisplayIndex, "display", 0, "SDL display index to show on (0-based)")
+	cmd.PersistentFlags().IntVar(&flags.FadeMS, "fade-ms", 500, "crossfade duration in ms when cover changes (0 disables)")
+	cmd.PersistentFlags().StringVar(&flags.Ease, "ease", "in-out-sine", "easing function for fades (e.g. in-sine, out-sine, in-out-sine, in-quad, out-cubic, out-expo, in-circ, out-elastic, out-bounce)")
 
 	// Current config keys:
 	// - roon.core
@@ -78,6 +82,8 @@ func newRootCmd(ctx context.Context) *cobra.Command {
 	_ = viper.BindPFlag("download.to_temp", cmd.PersistentFlags().Lookup("download-to-temp"))
 	_ = viper.BindPFlag("display.window", cmd.PersistentFlags().Lookup("window"))
 	_ = viper.BindPFlag("display.index", cmd.PersistentFlags().Lookup("display"))
+	_ = viper.BindPFlag("display.fade_ms", cmd.PersistentFlags().Lookup("fade-ms"))
+	_ = viper.BindPFlag("display.ease", cmd.PersistentFlags().Lookup("ease"))
 
 	cmd.AddCommand(newVersionCmd())
 	cmd.AddCommand(newRoonCmd())
@@ -101,6 +107,8 @@ func initConfig(configPath string) error {
 	viper.SetDefault("download.to_temp", false)
 	viper.SetDefault("display.window", false)
 	viper.SetDefault("display.index", 0)
+	viper.SetDefault("display.fade_ms", 500)
+	viper.SetDefault("display.ease", "in-out-sine")
 
 	if configPath == "" {
 		return nil

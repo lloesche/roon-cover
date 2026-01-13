@@ -14,6 +14,10 @@ type Update struct {
 	// If nil, the display should keep showing the last image (for now).
 	CoverImage    []byte
 	CoverMimeType string
+
+	// NoFade requests that the renderer swaps to this cover immediately (even if fade is enabled).
+	// Useful for "same cover, different size" refetches (e.g. after the window reports its real size).
+	NoFade bool
 }
 
 // ScreenInfo describes the actual SDL render output size and chosen display.

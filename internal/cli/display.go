@@ -67,6 +67,17 @@ func runKiosk(cmd *cobra.Command) error {
 	}
 	disp.DisplayIndex = viper.GetInt("display.index")
 	disp.InfoCh = infoCh
+	disp.FadeMS = viper.GetInt("display.fade_ms")
+	disp.Ease = viper.GetString("display.ease")
+
+	if disp.FadeMS < 0 {
+		return fmt.Errorf("--fade-ms must be >= 0 (got %d)", disp.FadeMS)
+	}
+	if disp.FadeMS > 0 {
+		if _, err := display.EasingByName(disp.Ease); err != nil {
+			return err
+		}
+	}
 
 	errCh := make(chan error, 1)
 
@@ -75,8 +86,17 @@ func runKiosk(cmd *cobra.Command) error {
 		defer close(updates)
 
 		var square SquareSize
-		// Seed an initial value so the first fetch works even before SDL reports output size.
-		square.UpdateFromOutput(nil, 800, 800)
+		// Wait for the renderer to report the real output size before we start fetching.
+		// This avoids an initial "guess" fetch (e.g. 800px) followed by an immediate refetch.
+		select {
+		case <-ctx.Done():
+			return
+		case info, ok := <-infoCh:
+			if !ok {
+				return
+			}
+			square.UpdateFromOutput(l, info.RenderWidth, info.RenderHeight)
+		}
 
 		// Keep SquareSize up to date with SDL output size changes.
 		go func() {
@@ -159,6 +179,7 @@ func runKiosk(cmd *cobra.Command) error {
 					NowPlaying:    np,
 					CoverImage:    img,
 					CoverMimeType: mime,
+					NoFade:        refetchForResize,
 				})
 
 				if downloadToTemp {
