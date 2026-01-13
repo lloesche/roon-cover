@@ -33,8 +33,9 @@ type SDLDisplay struct {
 	ShowArtist bool
 	ShowAlbum  bool
 
-	FontPath string
-	FontSize int
+	FontPath   string
+	FontSize   int
+	FontFadeMS int
 }
 
 func (d *SDLDisplay) Run(ctx context.Context, updates <-chan Update) error {
@@ -43,6 +44,12 @@ func (d *SDLDisplay) Run(ctx context.Context, updates <-chan Update) error {
 		return errors.New("display: fade-ms must be >= 0")
 	}
 	fadeDur := time.Duration(fadeMS) * time.Millisecond
+
+	fontFadeMS := d.FontFadeMS
+	if fontFadeMS < 0 {
+		return errors.New("display: font-fade-ms must be >= 0")
+	}
+	fontFadeDur := time.Duration(fontFadeMS) * time.Millisecond
 
 	easeName := strings.TrimSpace(d.Ease)
 	if easeName == "" {
@@ -210,26 +217,28 @@ func (d *SDLDisplay) Run(ctx context.Context, updates <-chan Update) error {
 		currW   int32
 		currH   int32
 
-		prevTex *sdl.Texture
-		prevW   int32
-		prevH   int32
+		pendingStr string
+		pendingTex *sdl.Texture
+		pendingW   int32
+		pendingH   int32
 
-		fading    bool
+		phase     int // 0=none, 1=fade-out, 2=fade-in
 		fadeStart time.Time
 	}
 
 	clearLine := func(l *textLine) {
-		if l.prevTex != nil {
-			l.prevTex.Destroy()
-			l.prevTex = nil
-		}
 		if l.currTex != nil {
 			l.currTex.Destroy()
 			l.currTex = nil
 		}
+		if l.pendingTex != nil {
+			l.pendingTex.Destroy()
+			l.pendingTex = nil
+		}
 		l.currStr = ""
-		l.currW, l.currH, l.prevW, l.prevH = 0, 0, 0, 0
-		l.fading = false
+		l.pendingStr = ""
+		l.currW, l.currH, l.pendingW, l.pendingH = 0, 0, 0, 0
+		l.phase = 0
 	}
 
 	titleLine := textLine{key: "title"}
@@ -340,9 +349,6 @@ func (d *SDLDisplay) Run(ctx context.Context, updates <-chan Update) error {
 		totalH := int32(0)
 		for _, ln := range lines {
 			h := ln.currH
-			if ln.prevH > h {
-				h = ln.prevH
-			}
 			totalH += h
 		}
 		if len(lines) > 1 {
@@ -352,31 +358,18 @@ func (d *SDLDisplay) Run(ctx context.Context, updates <-chan Update) error {
 
 		for _, ln := range lines {
 			h := ln.currH
-			if ln.prevH > h {
-				h = ln.prevH
-			}
-
-			if ln.fading && fadeDur > 0 && ln.prevTex != nil && ln.currTex != nil {
-				t := float64(time.Since(ln.fadeStart)) / float64(fadeDur)
+			alpha := 1.0
+			if ln.phase != 0 && fontFadeDur > 0 {
+				t := float64(time.Since(ln.fadeStart)) / float64(fontFadeDur)
 				e := clamp01(ease(t))
-				wPrev := ln.prevW
-				if wPrev <= 0 {
-					wPrev = ln.currW
+				if ln.phase == 1 {
+					alpha = 1 - e
+				} else if ln.phase == 2 {
+					alpha = e
 				}
-				wCurr := ln.currW
-				if wCurr <= 0 {
-					wCurr = ln.prevW
-				}
-				if err := drawLine(ln.prevTex, wPrev, ln.prevH, x, y, 1-e); err != nil {
-					return err
-				}
-				if err := drawLine(ln.currTex, wCurr, ln.currH, x, y, e); err != nil {
-					return err
-				}
-			} else {
-				if err := drawLine(ln.currTex, ln.currW, ln.currH, x, y, 1); err != nil {
-					return err
-				}
+			}
+			if err := drawLine(ln.currTex, ln.currW, ln.currH, x, y, alpha); err != nil {
+				return err
 			}
 
 			y += h + lineGap
@@ -404,7 +397,6 @@ func (d *SDLDisplay) Run(ctx context.Context, updates <-chan Update) error {
 				return nil
 			}
 
-			coverFadeStartedThisUpdate := false
 			coverUpdatedThisUpdate := false
 			textUpdatedThisUpdate := false
 
@@ -466,7 +458,6 @@ func (d *SDLDisplay) Run(ctx context.Context, updates <-chan Update) error {
 
 					coverFadeStart = time.Now()
 					coverFading = true
-					coverFadeStartedThisUpdate = true
 				}
 				coverUpdatedThisUpdate = true
 			}
@@ -483,7 +474,7 @@ func (d *SDLDisplay) Run(ctx context.Context, updates <-chan Update) error {
 				updateLine := func(ln *textLine, next string) error {
 					// Disabled or empty -> clear.
 					if strings.TrimSpace(next) == "" {
-						if ln.currStr != "" || ln.currTex != nil || ln.prevTex != nil {
+						if ln.currStr != "" || ln.currTex != nil || ln.pendingTex != nil {
 							clearLine(ln)
 							textUpdatedThisUpdate = true
 						}
@@ -503,38 +494,34 @@ func (d *SDLDisplay) Run(ctx context.Context, updates <-chan Update) error {
 						return nil
 					}
 
-					immediate := u.NoFade || fadeDur <= 0 || ln.currTex == nil
+					immediate := u.NoFade || fontFadeDur <= 0 || ln.currTex == nil
 					if immediate {
-						if ln.prevTex != nil {
-							ln.prevTex.Destroy()
-							ln.prevTex = nil
-						}
 						if ln.currTex != nil {
 							ln.currTex.Destroy()
 							ln.currTex = nil
 						}
+						if ln.pendingTex != nil {
+							ln.pendingTex.Destroy()
+							ln.pendingTex = nil
+						}
 						ln.currTex, ln.currW, ln.currH = newTex, newW, newH
 						ln.currStr = next
-						ln.fading = false
+						ln.pendingStr = ""
+						ln.phase = 0
 						textUpdatedThisUpdate = true
 						return nil
 					}
 
-					// Crossfade only this line.
-					if ln.prevTex != nil {
-						ln.prevTex.Destroy()
-						ln.prevTex = nil
+					// Fade-out-in: hold current, fade out; then swap to pending; then fade in.
+					if ln.pendingTex != nil {
+						ln.pendingTex.Destroy()
+						ln.pendingTex = nil
 					}
-					ln.prevTex, ln.prevW, ln.prevH = ln.currTex, ln.currW, ln.currH
-					ln.currTex, ln.currW, ln.currH = newTex, newW, newH
-					ln.currStr = next
+					ln.pendingTex, ln.pendingW, ln.pendingH = newTex, newW, newH
+					ln.pendingStr = next
 
-					if coverFadeStartedThisUpdate {
-						ln.fadeStart = coverFadeStart
-					} else {
-						ln.fadeStart = time.Now()
-					}
-					ln.fading = true
+					ln.phase = 1
+					ln.fadeStart = time.Now()
 					textUpdatedThisUpdate = true
 					return nil
 				}
@@ -593,24 +580,46 @@ func (d *SDLDisplay) Run(ctx context.Context, updates <-chan Update) error {
 				}
 			}
 
-			progressLine := func(ln *textLine) error {
-				if !ln.fading || fadeDur <= 0 || ln.prevTex == nil || ln.currTex == nil {
-					return nil
+			progressLine := func(ln *textLine) bool {
+				if ln.phase == 0 || fontFadeDur <= 0 {
+					return false
 				}
-				t := float64(time.Since(ln.fadeStart)) / float64(fadeDur)
-				if t >= 1 {
-					ln.fading = false
-					ln.prevTex.Destroy()
-					ln.prevTex = nil
+				t := float64(time.Since(ln.fadeStart)) / float64(fontFadeDur)
+				if t < 1 {
+					return true
 				}
-				return nil
+
+				// Phase transition.
+				if ln.phase == 1 {
+					// Fade-out complete: swap in pending, then fade-in.
+					if ln.currTex != nil {
+						ln.currTex.Destroy()
+						ln.currTex = nil
+					}
+					ln.currTex, ln.currW, ln.currH = ln.pendingTex, ln.pendingW, ln.pendingH
+					ln.currStr = ln.pendingStr
+					ln.pendingTex = nil
+					ln.pendingStr = ""
+					ln.pendingW, ln.pendingH = 0, 0
+
+					ln.phase = 2
+					ln.fadeStart = time.Now()
+					return true
+				}
+				if ln.phase == 2 {
+					// Fade-in complete.
+					ln.phase = 0
+					return true
+				}
+				return false
 			}
 
-			_ = progressLine(&titleLine)
-			_ = progressLine(&artistLine)
-			_ = progressLine(&albumLine)
+			needRender := false
+			needRender = progressLine(&titleLine) || needRender
+			needRender = progressLine(&artistLine) || needRender
+			needRender = progressLine(&albumLine) || needRender
 
-			if (titleLine.fading || artistLine.fading || albumLine.fading) && fadeDur > 0 {
+			if needRender {
 				if err := render(); err != nil {
 					return err
 				}

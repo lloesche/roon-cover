@@ -35,8 +35,9 @@ type rootFlags struct {
 	ShowAlbum  bool
 	ShowAll    bool
 
-	FontPath string
-	FontSize int
+	FontPath   string
+	FontSize   int
+	FontFadeMS int
 }
 
 func newRootCmd(ctx context.Context) *cobra.Command {
@@ -89,6 +90,7 @@ func newRootCmd(ctx context.Context) *cobra.Command {
 
 	cmd.PersistentFlags().StringVar(&flags.FontPath, "font", "", "path to a .ttf font file (optional; default is OS-specific)")
 	cmd.PersistentFlags().IntVar(&flags.FontSize, "font-size", 28, "font size in points for overlays")
+	cmd.PersistentFlags().IntVar(&flags.FontFadeMS, "font-fade-ms", 200, "text fade duration in ms for overlays (0 disables; independent of cover fade)")
 
 	// Current config keys:
 	// - roon.core
@@ -106,6 +108,7 @@ func newRootCmd(ctx context.Context) *cobra.Command {
 	_ = viper.BindPFlag("display.show_all", cmd.PersistentFlags().Lookup("show-all"))
 	_ = viper.BindPFlag("display.font", cmd.PersistentFlags().Lookup("font"))
 	_ = viper.BindPFlag("display.font_size", cmd.PersistentFlags().Lookup("font-size"))
+	_ = viper.BindPFlag("display.font_fade_ms", cmd.PersistentFlags().Lookup("font-fade-ms"))
 
 	cmd.AddCommand(newVersionCmd())
 	cmd.AddCommand(newRoonCmd())
@@ -137,6 +140,7 @@ func initConfig(configPath string) error {
 	viper.SetDefault("display.show_all", false)
 	viper.SetDefault("display.font", "")
 	viper.SetDefault("display.font_size", 28)
+	viper.SetDefault("display.font_fade_ms", 200)
 
 	if configPath == "" {
 		return nil

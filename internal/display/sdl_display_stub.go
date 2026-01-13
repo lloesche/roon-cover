@@ -21,8 +21,9 @@ type SDLDisplay struct {
 	ShowArtist bool
 	ShowAlbum  bool
 
-	FontPath string
-	FontSize int
+	FontPath   string
+	FontSize   int
+	FontFadeMS int
 }
 
 func (d *SDLDisplay) Run(ctx context.Context, updates <-chan Update) error {
