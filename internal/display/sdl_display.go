@@ -199,26 +199,47 @@ func (d *SDLDisplay) Run(ctx context.Context, updates <-chan Update) error {
 	var currW, currH int32
 	var prevW, prevH int32
 
-	// Text overlay state (optional).
-	var currTextTex *sdl.Texture
-	var prevTextTex *sdl.Texture
-	var currTextW, currTextH int32
-	var prevTextW, prevTextH int32
-	var currTextLines []string
-	defer func() {
-		if currTextTex != nil {
-			currTextTex.Destroy()
-		}
-		if prevTextTex != nil {
-			prevTextTex.Destroy()
-		}
-	}()
-
 	var coverFading bool
 	var coverFadeStart time.Time
 
-	var textFading bool
-	var textFadeStart time.Time
+	type textLine struct {
+		key string
+
+		currStr string
+		currTex *sdl.Texture
+		currW   int32
+		currH   int32
+
+		prevTex *sdl.Texture
+		prevW   int32
+		prevH   int32
+
+		fading    bool
+		fadeStart time.Time
+	}
+
+	clearLine := func(l *textLine) {
+		if l.prevTex != nil {
+			l.prevTex.Destroy()
+			l.prevTex = nil
+		}
+		if l.currTex != nil {
+			l.currTex.Destroy()
+			l.currTex = nil
+		}
+		l.currStr = ""
+		l.currW, l.currH, l.prevW, l.prevH = 0, 0, 0, 0
+		l.fading = false
+	}
+
+	titleLine := textLine{key: "title"}
+	artistLine := textLine{key: "artist"}
+	albumLine := textLine{key: "album"}
+	defer func() {
+		clearLine(&titleLine)
+		clearLine(&artistLine)
+		clearLine(&albumLine)
+	}()
 
 	alphaU8 := func(v float64) uint8 {
 		if v <= 0 {
@@ -262,49 +283,103 @@ func (d *SDLDisplay) Run(ctx context.Context, updates <-chan Update) error {
 			}
 		}
 
-		// Draw text overlay (with matching fade alphas).
-		drawText := func(tex *sdl.Texture, tw, th int32, alpha uint8) error {
+		// drawLine draws a line texture at (x,y). We fade text via alpha modulation.
+		// A small gamma curve helps keep the fade perceptually smooth and avoids "black ghost" artifacts.
+		drawLine := func(tex *sdl.Texture, tw, th int32, x, y int32, intensity float64) error {
 			if tex == nil || tw <= 0 || th <= 0 {
 				return nil
 			}
-			_ = tex.SetAlphaMod(alpha)
-			pad := int32(24)
-			x := pad
-			y := int32(wh) - pad - th
-			dst := sdl.Rect{X: x, Y: y, W: tw, H: th}
+			intensity = clamp01(intensity)
+			_ = tex.SetBlendMode(sdl.BLENDMODE_BLEND)
 
+			// Perceptual curve: make very-low alpha spend less time looking jagged.
+			// (Also ensures intensity=0 actually draws nothing.)
+			i := math.Sqrt(intensity)
+
+			// Shadow: draw the same glyph mask in black behind the text, fading with intensity.
+			shadowOffsets := []sdl.Point{
+				{X: 2, Y: 2},
+				{X: 2, Y: 3},
+				{X: 3, Y: 2},
+				{X: 3, Y: 3},
+			}
+			shadowAlpha := uint8(math.Round(160 * i))
+			_ = tex.SetColorMod(0, 0, 0)
+			_ = tex.SetAlphaMod(shadowAlpha)
+			for _, off := range shadowOffsets {
+				dst := sdl.Rect{X: x + int32(off.X), Y: y + int32(off.Y), W: tw, H: th}
+				if err := ren.Copy(tex, nil, &dst); err != nil {
+					return err
+				}
+			}
+
+			// Main text: fade via alpha.
+			mainAlpha := uint8(math.Round(255 * i))
+			_ = tex.SetColorMod(255, 255, 255)
+			_ = tex.SetAlphaMod(mainAlpha)
+			dst := sdl.Rect{X: x, Y: y, W: tw, H: th}
 			return ren.Copy(tex, nil, &dst)
 		}
 
-		// Text fade can be driven either by a cover fade (when both change) or by a text-only fade.
-		// Prefer the cover fade when active so text stays in sync with cover transitions.
-		switch {
-		case coverFading && fadeDur > 0 && prevTextTex != nil && currTextTex != nil:
-			t := float64(time.Since(coverFadeStart)) / float64(fadeDur)
-			e := clamp01(ease(t))
-			aPrev := alphaU8(1 - e)
-			aCurr := alphaU8(e)
-			if err := drawText(prevTextTex, prevTextW, prevTextH, aPrev); err != nil {
-				return err
+		// Draw per-line overlays. Only lines that actually changed are faded.
+		pad := int32(24)
+		lineGap := int32(6)
+		x := pad
+
+		lines := make([]*textLine, 0, 3)
+		if d.ShowTitle && titleLine.currTex != nil {
+			lines = append(lines, &titleLine)
+		}
+		if d.ShowArtist && artistLine.currTex != nil {
+			lines = append(lines, &artistLine)
+		}
+		if d.ShowAlbum && albumLine.currTex != nil {
+			lines = append(lines, &albumLine)
+		}
+
+		totalH := int32(0)
+		for _, ln := range lines {
+			h := ln.currH
+			if ln.prevH > h {
+				h = ln.prevH
 			}
-			if err := drawText(currTextTex, currTextW, currTextH, aCurr); err != nil {
-				return err
+			totalH += h
+		}
+		if len(lines) > 1 {
+			totalH += int32(len(lines)-1) * lineGap
+		}
+		y := int32(wh) - pad - totalH
+
+		for _, ln := range lines {
+			h := ln.currH
+			if ln.prevH > h {
+				h = ln.prevH
 			}
-		case textFading && fadeDur > 0 && prevTextTex != nil && currTextTex != nil:
-			t := float64(time.Since(textFadeStart)) / float64(fadeDur)
-			e := clamp01(ease(t))
-			aPrev := alphaU8(1 - e)
-			aCurr := alphaU8(e)
-			if err := drawText(prevTextTex, prevTextW, prevTextH, aPrev); err != nil {
-				return err
+
+			if ln.fading && fadeDur > 0 && ln.prevTex != nil && ln.currTex != nil {
+				t := float64(time.Since(ln.fadeStart)) / float64(fadeDur)
+				e := clamp01(ease(t))
+				wPrev := ln.prevW
+				if wPrev <= 0 {
+					wPrev = ln.currW
+				}
+				wCurr := ln.currW
+				if wCurr <= 0 {
+					wCurr = ln.prevW
+				}
+				if err := drawLine(ln.prevTex, wPrev, ln.prevH, x, y, 1-e); err != nil {
+					return err
+				}
+				if err := drawLine(ln.currTex, wCurr, ln.currH, x, y, e); err != nil {
+					return err
+				}
+			} else {
+				if err := drawLine(ln.currTex, ln.currW, ln.currH, x, y, 1); err != nil {
+					return err
+				}
 			}
-			if err := drawText(currTextTex, currTextW, currTextH, aCurr); err != nil {
-				return err
-			}
-		default:
-			if err := drawText(currTextTex, currTextW, currTextH, 255); err != nil {
-				return err
-			}
+
+			y += h + lineGap
 		}
 
 		ren.Present()
@@ -329,62 +404,9 @@ func (d *SDLDisplay) Run(ctx context.Context, updates <-chan Update) error {
 				return nil
 			}
 
-			textChanged := false
-
-			// Update text overlay (if enabled) whenever metadata changes.
-			if font != nil && (d.ShowTitle || d.ShowArtist || d.ShowAlbum) {
-				lines := buildOverlayLines(u.NowPlaying, d.ShowTitle, d.ShowArtist, d.ShowAlbum)
-				sameText := sameLines(lines, currTextLines)
-
-				// If there's no text to show, clear any existing overlay.
-				if len(lines) == 0 {
-					if currTextTex != nil {
-						currTextTex.Destroy()
-						currTextTex = nil
-					}
-					if prevTextTex != nil {
-						prevTextTex.Destroy()
-						prevTextTex = nil
-					}
-					currTextW, currTextH = 0, 0
-					prevTextW, prevTextH = 0, 0
-					currTextLines = nil
-					textChanged = true
-					textFading = false
-				} else if !sameText {
-					newTextTex, newTW, newTH, err := renderTextBlock(ren, font, lines)
-					if err == nil {
-						immediate := u.NoFade || fadeDur <= 0 || currTextTex == nil
-						if immediate {
-							if prevTextTex != nil {
-								prevTextTex.Destroy()
-								prevTextTex = nil
-							}
-							if currTextTex != nil {
-								currTextTex.Destroy()
-								currTextTex = nil
-							}
-							currTextTex, currTextW, currTextH = newTextTex, newTW, newTH
-							currTextLines = lines
-							textFading = false
-						} else {
-							if prevTextTex != nil {
-								prevTextTex.Destroy()
-								prevTextTex = nil
-							}
-							prevTextTex, prevTextW, prevTextH = currTextTex, currTextW, currTextH
-
-							currTextTex, currTextW, currTextH = newTextTex, newTW, newTH
-							currTextLines = lines
-
-							// Text-only transition: fade between the previous and current text.
-							textFadeStart = time.Now()
-							textFading = true
-						}
-						textChanged = true
-					}
-				}
-			}
+			coverFadeStartedThisUpdate := false
+			coverUpdatedThisUpdate := false
+			textUpdatedThisUpdate := false
 
 			if len(u.CoverImage) > 0 {
 				img, _, err := image.Decode(bytes.NewReader(u.CoverImage))
@@ -444,15 +466,106 @@ func (d *SDLDisplay) Run(ctx context.Context, updates <-chan Update) error {
 
 					coverFadeStart = time.Now()
 					coverFading = true
+					coverFadeStartedThisUpdate = true
 				}
-
-				if err := render(); err != nil {
-					return err
-				}
+				coverUpdatedThisUpdate = true
 			}
 
-			// Text-only update (same cover, new metadata) should repaint immediately.
-			if textChanged && len(u.CoverImage) == 0 {
+			// Update per-line text overlays (if enabled).
+			if font != nil && (d.ShowTitle || d.ShowArtist || d.ShowAlbum) {
+				var title, artist, album string
+				if u.NowPlaying != nil {
+					title = strings.TrimSpace(u.NowPlaying.Title)
+					artist = strings.TrimSpace(u.NowPlaying.Artist)
+					album = strings.TrimSpace(u.NowPlaying.Album)
+				}
+
+				updateLine := func(ln *textLine, next string) error {
+					// Disabled or empty -> clear.
+					if strings.TrimSpace(next) == "" {
+						if ln.currStr != "" || ln.currTex != nil || ln.prevTex != nil {
+							clearLine(ln)
+							textUpdatedThisUpdate = true
+						}
+						return nil
+					}
+					if next == ln.currStr {
+						return nil
+					}
+
+					newTex, newW, newH, err := renderTextLine(ren, font, next)
+					if err != nil {
+						return err
+					}
+					if newTex == nil {
+						clearLine(ln)
+						ln.currStr = ""
+						return nil
+					}
+
+					immediate := u.NoFade || fadeDur <= 0 || ln.currTex == nil
+					if immediate {
+						if ln.prevTex != nil {
+							ln.prevTex.Destroy()
+							ln.prevTex = nil
+						}
+						if ln.currTex != nil {
+							ln.currTex.Destroy()
+							ln.currTex = nil
+						}
+						ln.currTex, ln.currW, ln.currH = newTex, newW, newH
+						ln.currStr = next
+						ln.fading = false
+						textUpdatedThisUpdate = true
+						return nil
+					}
+
+					// Crossfade only this line.
+					if ln.prevTex != nil {
+						ln.prevTex.Destroy()
+						ln.prevTex = nil
+					}
+					ln.prevTex, ln.prevW, ln.prevH = ln.currTex, ln.currW, ln.currH
+					ln.currTex, ln.currW, ln.currH = newTex, newW, newH
+					ln.currStr = next
+
+					if coverFadeStartedThisUpdate {
+						ln.fadeStart = coverFadeStart
+					} else {
+						ln.fadeStart = time.Now()
+					}
+					ln.fading = true
+					textUpdatedThisUpdate = true
+					return nil
+				}
+
+				if d.ShowTitle {
+					if err := updateLine(&titleLine, title); err != nil {
+						return err
+					}
+				} else {
+					clearLine(&titleLine)
+				}
+				if d.ShowArtist {
+					if err := updateLine(&artistLine, artist); err != nil {
+						return err
+					}
+				} else {
+					clearLine(&artistLine)
+				}
+				if d.ShowAlbum {
+					if err := updateLine(&albumLine, album); err != nil {
+						return err
+					}
+				} else {
+					clearLine(&albumLine)
+				}
+
+				// (render happens once at the end of the update)
+			}
+
+			// Ensure the very first update renders both cover + text (startup text bug fix).
+			if coverUpdatedThisUpdate || textUpdatedThisUpdate {
 				if err := render(); err != nil {
 					return err
 				}
@@ -480,21 +593,26 @@ func (d *SDLDisplay) Run(ctx context.Context, updates <-chan Update) error {
 				}
 			}
 
-			// Progress text-only fade (if active).
-			if textFading && fadeDur > 0 && prevTextTex != nil && currTextTex != nil {
-				t := float64(time.Since(textFadeStart)) / float64(fadeDur)
+			progressLine := func(ln *textLine) error {
+				if !ln.fading || fadeDur <= 0 || ln.prevTex == nil || ln.currTex == nil {
+					return nil
+				}
+				t := float64(time.Since(ln.fadeStart)) / float64(fadeDur)
 				if t >= 1 {
-					textFading = false
-					prevTextTex.Destroy()
-					prevTextTex = nil
-					if err := render(); err != nil {
-						return err
-					}
-				} else {
-					// Keep redrawing while fading (alphas are computed in render()).
-					if err := render(); err != nil {
-						return err
-					}
+					ln.fading = false
+					ln.prevTex.Destroy()
+					ln.prevTex = nil
+				}
+				return nil
+			}
+
+			_ = progressLine(&titleLine)
+			_ = progressLine(&artistLine)
+			_ = progressLine(&albumLine)
+
+			if (titleLine.fading || artistLine.fading || albumLine.fading) && fadeDur > 0 {
+				if err := render(); err != nil {
+					return err
 				}
 			}
 
