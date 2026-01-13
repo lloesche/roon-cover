@@ -96,14 +96,53 @@ func (d *SDLDisplay) Run(ctx context.Context, updates <-chan Update) error {
 		fontSize = 28
 	}
 
-	var font *ttf.Font
-	if fontPath != "" && (d.ShowTitle || d.ShowArtist || d.ShowAlbum) {
-		f, err := ttf.OpenFont(fontPath, fontSize)
-		if err != nil {
-			return err
+	var fonts []*ttf.Font
+	if d.ShowTitle || d.ShowArtist || d.ShowAlbum {
+		// Build a small font stack: primary first, then fallbacks.
+		// This allows rendering Unicode like U+2010 (‐) without normalizing text.
+		candidatePaths := make([]string, 0, 8)
+		seen := map[string]struct{}{}
+		addPath := func(p string) {
+			p = strings.TrimSpace(p)
+			if p == "" {
+				return
+			}
+			if _, ok := seen[p]; ok {
+				return
+			}
+			seen[p] = struct{}{}
+			candidatePaths = append(candidatePaths, p)
 		}
-		font = f
-		defer font.Close()
+
+		if fontPath != "" {
+			addPath(fontPath)
+		}
+		for _, p := range defaultFontCandidates() {
+			addPath(p)
+		}
+
+		for _, p := range candidatePaths {
+			f, err := ttf.OpenFont(p, fontSize)
+			if err != nil {
+				continue
+			}
+			fonts = append(fonts, f)
+			// Keep the stack small.
+			if len(fonts) >= 5 {
+				break
+			}
+		}
+		defer func() {
+			for _, f := range fonts {
+				if f != nil {
+					f.Close()
+				}
+			}
+		}()
+
+		if len(fonts) == 0 {
+			return errors.New("no usable fonts available; specify one via --font")
+		}
 	}
 
 	// Log available displays at startup.
@@ -463,7 +502,7 @@ func (d *SDLDisplay) Run(ctx context.Context, updates <-chan Update) error {
 			}
 
 			// Update per-line text overlays (if enabled).
-			if font != nil && (d.ShowTitle || d.ShowArtist || d.ShowAlbum) {
+			if len(fonts) > 0 && (d.ShowTitle || d.ShowArtist || d.ShowAlbum) {
 				var title, artist, album string
 				if u.NowPlaying != nil {
 					title = strings.TrimSpace(u.NowPlaying.Title)
@@ -484,7 +523,7 @@ func (d *SDLDisplay) Run(ctx context.Context, updates <-chan Update) error {
 						return nil
 					}
 
-					newTex, newW, newH, err := renderTextLine(ren, font, next)
+					newTex, newW, newH, err := renderTextLine(ren, fonts, next)
 					if err != nil {
 						return err
 					}
