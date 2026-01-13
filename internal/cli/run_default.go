@@ -69,6 +69,7 @@ func runDefault(cmd *cobra.Command) error {
 	var lastKey roon.ImageKey
 	var lastDownloaded roon.ImageKey
 	var lastState roon.ZoneState
+	var zlog ZoneStatusLogger
 
 	return client.SubscribeZones(ctx, core, func(update roon.ZoneUpdate) error {
 
@@ -80,11 +81,11 @@ func runDefault(cmd *cobra.Command) error {
 			}
 
 			if z.NowPlaying == nil {
-				_, _ = fmt.Fprintf(cmd.OutOrStdout(), "%s [%s]: (no now playing)\n", z.Name, z.State)
+				zlog.Observe(l, z)
 				return nil
 			}
 
-			_, _ = fmt.Fprintf(cmd.OutOrStdout(), "%s [%s]: %s — %s (image_key=%s)\n", z.Name, z.State, z.NowPlaying.Artist, z.NowPlaying.Title, z.NowPlaying.ImageKey)
+			zlog.Observe(l, z)
 
 			// Gate downloads on playback state:
 			// - Only download when state is playing (or when transitioning into playing).

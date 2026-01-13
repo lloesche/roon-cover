@@ -50,6 +50,7 @@ func newDisplayCmd() *cobra.Command {
 			go func() {
 				defer close(updates)
 
+				var zlog ZoneStatusLogger
 				var lastKey roon.ImageKey
 				var lastState roon.ZoneState
 				var lastDownloaded roon.ImageKey
@@ -81,6 +82,9 @@ func newDisplayCmd() *cobra.Command {
 								NowPlaying: np,
 							})
 						}
+
+						// Always log zone status transitions while in display mode.
+						zlog.Observe(l, z)
 
 						// Only fetch/display covers when zone is actually playing.
 						if z.State != roon.ZoneStatePlaying || key == "" || np == nil {
