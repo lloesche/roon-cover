@@ -13,6 +13,7 @@ type SDLDisplay struct {
 	Title        string
 	Fullscreen   bool
 	DisplayIndex int
+	InfoCh       chan<- ScreenInfo
 }
 
 func (d *SDLDisplay) Run(ctx context.Context, updates <-chan Update) error {

@@ -21,15 +21,27 @@ func maybeDownloadCoverToTemp(ctx context.Context, log *slog.Logger, client *roo
 		return
 	}
 
-	// Keep size reasonable; we can make this configurable later.
-	img, mime, err := client.FetchImage(ctx, core, zone.NowPlaying.ImageKey, roon.ImageFetchOptions{Size: 800})
+	// Download mode: fetch "4K-ish" so the file is high quality.
+	// For a square cover, that usually means 2160x2160.
+	img, mime, err := client.FetchImage(ctx, core, zone.NowPlaying.ImageKey, roon.ImageFetchOptions{Size: 2160})
 	if err != nil {
 		log.Warn("cover download failed", "zone", zone.Name, "image_key", zone.NowPlaying.ImageKey, "err", err)
 		return
 	}
 
+	writeCoverBytesToTemp(log, zone.Name, img, mime)
+}
+
+func writeCoverBytesToTemp(log *slog.Logger, zoneName string, img []byte, mime string) {
+	if log == nil {
+		log = slog.Default()
+	}
+	if len(img) == 0 {
+		return
+	}
+
 	ext := extForMime(mime)
-	prefix := "roon-cover-" + sanitizeFilename(zone.Name) + "-*"
+	prefix := "roon-cover-" + sanitizeFilename(zoneName) + "-*"
 	pattern := prefix + ext
 
 	f, err := os.CreateTemp(os.TempDir(), pattern)
@@ -46,7 +58,7 @@ func maybeDownloadCoverToTemp(ctx context.Context, log *slog.Logger, client *roo
 	}
 
 	abs, _ := filepath.Abs(f.Name())
-	log.Info("cover downloaded to temp", "path", abs, "mime", mime, "bytes", len(img), "zone", zone.Name)
+	log.Info("cover downloaded to temp", "path", abs, "mime", mime, "bytes", len(img), "zone", zoneName)
 }
 
 func extForMime(mime string) string {

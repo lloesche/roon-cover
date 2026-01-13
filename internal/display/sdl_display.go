@@ -22,6 +22,7 @@ type SDLDisplay struct {
 	Title        string
 	Fullscreen   bool
 	DisplayIndex int
+	InfoCh       chan<- ScreenInfo
 }
 
 func (d *SDLDisplay) Run(ctx context.Context, updates <-chan Update) error {
@@ -73,7 +74,12 @@ func (d *SDLDisplay) Run(ctx context.Context, updates <-chan Update) error {
 		bounds = sdl.Rect{X: sdl.WINDOWPOS_CENTERED, Y: sdl.WINDOWPOS_CENTERED, W: int32(w), H: int32(h)}
 	}
 
-	win, err := sdl.CreateWindow(title, bounds.X, bounds.Y, int32(w), int32(h), sdl.WINDOW_SHOWN)
+	flags := uint32(sdl.WINDOW_SHOWN)
+	if !d.Fullscreen {
+		flags |= sdl.WINDOW_RESIZABLE
+	}
+
+	win, err := sdl.CreateWindow(title, bounds.X, bounds.Y, int32(w), int32(h), flags)
 	if err != nil {
 		return err
 	}
@@ -97,6 +103,23 @@ func (d *SDLDisplay) Run(ctx context.Context, updates <-chan Update) error {
 		return err
 	}
 	defer ren.Destroy()
+
+	reportOutputSize := func() {
+		if d.InfoCh == nil {
+			return
+		}
+		ww, wh, err := ren.GetOutputSize()
+		if err != nil {
+			return
+		}
+		select {
+		case d.InfoCh <- ScreenInfo{DisplayIndex: displayIndex, RenderWidth: int(ww), RenderHeight: int(wh)}:
+		default:
+		}
+	}
+
+	// Report initial output size (important for choosing cover fetch size).
+	reportOutputSize()
 
 	var tex *sdl.Texture
 	defer func() {
@@ -197,7 +220,12 @@ func (d *SDLDisplay) Run(ctx context.Context, updates <-chan Update) error {
 				case *sdl.QuitEvent:
 					return nil
 				case *sdl.WindowEvent:
-					// Repaint on expose/resize (future).
+					we := e.(*sdl.WindowEvent)
+					// Keep output-size info up to date (window resize, display changes, etc.).
+					switch we.Event {
+					case sdl.WINDOWEVENT_RESIZED, sdl.WINDOWEVENT_SIZE_CHANGED, sdl.WINDOWEVENT_DISPLAY_CHANGED:
+						reportOutputSize()
+					}
 				}
 			}
 		}

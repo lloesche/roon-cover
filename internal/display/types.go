@@ -15,3 +15,11 @@ type Update struct {
 	CoverImage    []byte
 	CoverMimeType string
 }
+
+// ScreenInfo describes the actual SDL render output size and chosen display.
+// This allows the producer (roon fetcher) to request a suitably-sized cover image.
+type ScreenInfo struct {
+	DisplayIndex int
+	RenderWidth  int
+	RenderHeight int
+}

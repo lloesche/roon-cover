@@ -84,7 +84,11 @@ func (c *Client) Pair(ctx context.Context, core Core) (Credentials, error) {
 
 type ImageFetchOptions struct {
 	// Size is the target square dimension in pixels (e.g. 600, 800).
-	// Exact semantics depend on Roon's image service parameters (to be implemented).
+	//
+	// Implemented in `internal/roon/image.go` using Roon's HTTP endpoint:
+	//   /api/image/<image_key>?scale=fit&width=<Size>&height=<Size>&format=image/jpeg
+	//
+	// If Size is 0, the original size is requested (Roon may return a large image).
 	Size int
 }
 

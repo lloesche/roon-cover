@@ -51,6 +51,7 @@ func runKiosk(cmd *cobra.Command) error {
 	}
 
 	updates := make(chan display.Update, 2)
+	infoCh := make(chan display.ScreenInfo, 1)
 
 	disp := &display.SDLDisplay{
 		Title: fmt.Sprintf("roon-cover — %s", zoneName),
@@ -65,6 +66,7 @@ func runKiosk(cmd *cobra.Command) error {
 		disp.Fullscreen = true
 	}
 	disp.DisplayIndex = viper.GetInt("display.index")
+	disp.InfoCh = infoCh
 
 	errCh := make(chan error, 1)
 
@@ -72,10 +74,32 @@ func runKiosk(cmd *cobra.Command) error {
 	go func() {
 		defer close(updates)
 
+		var square SquareSize
+		// Seed an initial value so the first fetch works even before SDL reports output size.
+		if windowed {
+			square.UpdateFromOutput(nil, 800, 800)
+		} else {
+			square.UpdateFromOutput(nil, 800, 800)
+		}
+
+		// Keep SquareSize up to date with SDL output size changes.
+		go func() {
+			for {
+				select {
+				case <-ctx.Done():
+					return
+				case info := <-infoCh:
+					square.UpdateFromOutput(l, info.RenderWidth, info.RenderHeight)
+				}
+			}
+		}()
+
 		var zlog ZoneStatusLogger
 		var lastKey roon.ImageKey
 		var lastState roon.ZoneState
 		var lastDownloaded roon.ImageKey
+		var lastFetchedSize int
+		var lastFetchAt time.Time
 
 		err := client.SubscribeZones(ctx, core, func(update roon.ZoneUpdate) error {
 			for _, z := range update.Zones {
@@ -106,20 +130,30 @@ func runKiosk(cmd *cobra.Command) error {
 
 				justStartedPlaying := prevState != roon.ZoneStatePlaying && z.State == roon.ZoneStatePlaying
 				keyChanged := key != prevKey
-				shouldFetch := (justStartedPlaying || keyChanged) && key != lastDownloaded
+				wantSize := square.Get()
+
+				// If the window/display grew a lot, refetch the current cover even if key unchanged.
+				// Debounced to avoid spam while resizing.
+				sizeBumped := wantSize > lastFetchedSize+64
+				canRefetchNow := time.Since(lastFetchAt) > 750*time.Millisecond
+				refetchForResize := (key == lastDownloaded) && sizeBumped && canRefetchNow
+
+				shouldFetch := ((justStartedPlaying || keyChanged) && key != lastDownloaded) || refetchForResize
 				if !shouldFetch {
 					l.Debug("display: skip cover fetch", "zone", z.Name, "state", z.State, "image_key", key, "just_started", justStartedPlaying, "key_changed", keyChanged)
 					return nil
 				}
 
-				l.Debug("display: fetching cover", "zone", z.Name, "state", z.State, "image_key", key, "just_started", justStartedPlaying, "key_changed", keyChanged)
-				img, mime, err := client.FetchImage(ctx, core, key, roon.ImageFetchOptions{Size: 800})
+				l.Debug("display: fetching cover", "zone", z.Name, "state", z.State, "image_key", key, "size", wantSize, "just_started", justStartedPlaying, "key_changed", keyChanged, "refetch_resize", refetchForResize)
+				img, mime, err := client.FetchImage(ctx, core, key, roon.ImageFetchOptions{Size: wantSize})
 				if err != nil {
 					l.Warn("fetch image failed", "err", err, "image_key", key)
 					return nil
 				}
 
 				lastDownloaded = key
+				lastFetchedSize = wantSize
+				lastFetchAt = time.Now()
 				sendLatest(updates, display.Update{
 					Zone:          z.Name,
 					State:         z.State,
@@ -129,8 +163,8 @@ func runKiosk(cmd *cobra.Command) error {
 				})
 
 				if downloadToTemp {
-					// For now, reuse the existing helper (it re-fetches); we'll optimize to avoid double fetch later.
-					maybeDownloadCoverToTemp(ctx, l, client, core, z)
+					// Reuse already fetched bytes (avoid double fetch).
+					writeCoverBytesToTemp(l, z.Name, img, mime)
 				}
 
 				return nil
