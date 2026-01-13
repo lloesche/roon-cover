@@ -27,12 +27,8 @@ build/
 .idea/
 *.iml
 
-# Keep VS Code settings we commit (for gopls build tags), ignore the rest.
-.vscode/*
-!.vscode/settings.json
-!.vscode/extensions.json
-!.vscode/launch.json
-!.vscode/tasks.json
+# VS Code (local settings)
+.vscode/
 
 # OS files
 .DS_Store
