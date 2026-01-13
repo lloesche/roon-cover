@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"strconv"
 	"strings"
 )
@@ -123,7 +124,7 @@ func parseMooFrame(buf []byte) (*mooFrame, error) {
 			return nil, errors.New("moo: Content-Length without Content-Type")
 		}
 		body := make([]byte, m.ContentLength)
-		if _, err := r.Read(body); err != nil {
+		if _, err := io.ReadFull(r, body); err != nil {
 			return nil, errors.New("moo: truncated body")
 		}
 		m.BodyRaw = body

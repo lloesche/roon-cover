@@ -261,7 +261,7 @@ func (d *SDLDisplay) Run(ctx context.Context, updates <-chan Update) error {
 		pendingW   int32
 		pendingH   int32
 
-		phase     int // 0=none, 1=fade-out, 2=fade-in
+		phase     textPhase
 		fadeStart time.Time
 	}
 
@@ -288,16 +288,6 @@ func (d *SDLDisplay) Run(ctx context.Context, updates <-chan Update) error {
 		clearLine(&artistLine)
 		clearLine(&albumLine)
 	}()
-
-	alphaU8 := func(v float64) uint8 {
-		if v <= 0 {
-			return 0
-		}
-		if v >= 1 {
-			return 255
-		}
-		return uint8(math.Round(v * 255))
-	}
 
 	render := func() error {
 		ww, wh, err := ren.GetOutputSize()
@@ -400,12 +390,7 @@ func (d *SDLDisplay) Run(ctx context.Context, updates <-chan Update) error {
 			alpha := 1.0
 			if ln.phase != 0 && fontFadeDur > 0 {
 				t := float64(time.Since(ln.fadeStart)) / float64(fontFadeDur)
-				e := clamp01(ease(t))
-				if ln.phase == 1 {
-					alpha = 1 - e
-				} else if ln.phase == 2 {
-					alpha = e
-				}
+				alpha = textIntensity(ln.phase, t, ease)
 			}
 			if err := drawLine(ln.currTex, ln.currW, ln.currH, x, y, alpha); err != nil {
 				return err
@@ -559,7 +544,7 @@ func (d *SDLDisplay) Run(ctx context.Context, updates <-chan Update) error {
 					ln.pendingTex, ln.pendingW, ln.pendingH = newTex, newW, newH
 					ln.pendingStr = next
 
-					ln.phase = 1
+					ln.phase = textPhaseFadeOut
 					ln.fadeStart = time.Now()
 					textUpdatedThisUpdate = true
 					return nil
@@ -610,9 +595,9 @@ func (d *SDLDisplay) Run(ctx context.Context, updates <-chan Update) error {
 						return err
 					}
 				} else {
-					e := clamp01(ease(t))
-					_ = prevTex.SetAlphaMod(alphaU8(1 - e))
-					_ = currTex.SetAlphaMod(alphaU8(e))
+					pA, cA, _ := coverFadeAlphas(t, ease)
+					_ = prevTex.SetAlphaMod(pA)
+					_ = currTex.SetAlphaMod(cA)
 					if err := render(); err != nil {
 						return err
 					}
@@ -628,8 +613,8 @@ func (d *SDLDisplay) Run(ctx context.Context, updates <-chan Update) error {
 					return true
 				}
 
-				// Phase transition.
-				if ln.phase == 1 {
+				next, swap := advanceTextPhase(ln.phase, t)
+				if swap {
 					// Fade-out complete: swap in pending, then fade-in.
 					if ln.currTex != nil {
 						ln.currTex.Destroy()
@@ -641,16 +626,13 @@ func (d *SDLDisplay) Run(ctx context.Context, updates <-chan Update) error {
 					ln.pendingStr = ""
 					ln.pendingW, ln.pendingH = 0, 0
 
-					ln.phase = 2
+					ln.phase = next
 					ln.fadeStart = time.Now()
 					return true
 				}
-				if ln.phase == 2 {
-					// Fade-in complete.
-					ln.phase = 0
-					return true
-				}
-				return false
+				// Fade-in complete (or unexpected phase): settle.
+				ln.phase = next
+				return true
 			}
 
 			needRender := false
