@@ -45,9 +45,9 @@ func newRootCmd(ctx context.Context) *cobra.Command {
 				return err
 			}
 
-			cmd.SetContext(withLogger(ctx, logger()))
+			cmd.SetContext(withLogger(cmd.Context(), logger()))
 			if flags.PprofAddr != "" {
-				if err := startPprof(flags.PprofAddr, logger()); err != nil {
+				if err := startPprof(cmd.Context(), flags.PprofAddr, logger()); err != nil {
 					return err
 				}
 			}
@@ -86,6 +86,7 @@ func newRootCmd(ctx context.Context) *cobra.Command {
 	cmd.SetOut(os.Stdout)
 	cmd.SetErr(os.Stderr)
 
+	cmd.SetContext(ctx)
 	return cmd
 }
 

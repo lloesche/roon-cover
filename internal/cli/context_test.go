@@ -9,7 +9,7 @@ import (
 func TestLoggerFromContext_Default(t *testing.T) {
 	t.Parallel()
 
-	l := LoggerFromContext(context.TODO())
+	l := LoggerFromContext(context.Background())
 	if l == nil {
 		t.Fatalf("expected non-nil logger")
 	}

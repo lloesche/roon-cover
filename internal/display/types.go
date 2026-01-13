@@ -10,7 +10,7 @@ type Update struct {
 
 	NowPlaying *roon.NowPlaying
 
-	// CoverImage contains the raw bytes of the decoded cover as provided by Roon's image service.
+	// CoverImage contains the raw image bytes returned by Roon's image service (e.g. JPEG/PNG).
 	// If nil, the display should keep showing the last image (for now).
 	CoverImage    []byte
 	CoverMimeType string

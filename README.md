@@ -28,8 +28,8 @@ Proposed process split (can start in one process and split later if needed):
 
 - `cmd/roon-cover` (single binary) with internal packages:
   - `internal/roon/` (discovery, pairing, subscribe_zones, image fetch)
-  - `internal/state/` (zone selection, current image tracking, debouncing)
-  - `internal/render/` (SDL2 renderer; later optional DRM/KMS backend)
+  - `internal/cli/` (Cobra CLI, config/logging, kiosk orchestration)
+  - `internal/display/` (SDL2 renderer; build-tagged, see below)
 
 ## Renderer choice: SDL vs DRM/KMS
 
@@ -55,35 +55,46 @@ Later we can consider a DRM/KMS backend for minimal dependencies and faster boot
   - Wi‑Fi drops on Pi
   - pairing token refresh
 
-## Configuration (planned)
+## Configuration
 
 - **Zone selection**: zone name (exact match) or a stable zone identifier if available.
 - **Display**: fullscreen mode, target display index, background color.
 - **Image**: preferred size (e.g. 600px/800px), cache size, fetch timeout.
 - **Logging**: verbose/debug mode.
 
-We’ll likely support:
-- CLI flags (e.g. `--zone "Living Room"`)
-- environment variables (for service deployment on Pi)
-- optionally a small config file (TOML/YAML) later
+We currently support:
+- CLI flags (run `roon-cover --help`)
+- environment variables (prefix `ROON_COVER_`, e.g. `ROON_COVER_ROON_ZONE`)
+- optional config file via `--config` (any Viper-supported format)
+
+Key flags:
+- `--roon-core` / `ROON_COVER_ROON_CORE`
+- `--roon-zone` / `ROON_COVER_ROON_ZONE`
+- `--display` (SDL display index, 0-based)
+- `--window` (800x800 windowed instead of fullscreen)
+- `--download-to-temp` (write latest cover to temp dir for debugging)
+- `--log-level`, `--log-format`
+- `--pprof-addr` (optional local profiling server)
+
+SDL build tag:
+- The SDL renderer is built behind the `sdl` build tag (see `internal/display/sdl_display.go`).
 
 ## Development notes
 
 ### Roon extension protocol
 
-We will implement a minimal subset of the Roon extension API:
+We implement a minimal subset of the Roon extension API:
 
 - discovery (find Core on LAN)
 - pairing (authorize our extension)
 - `transport.subscribe_zones` (stream zone state changes)
 - image fetch (retrieve cover art bytes)
 
-### Testing strategy (planned)
+### Testing strategy
 
-- unit tests for:
-  - zone selection logic
-  - state transitions (track change → fetch → render)
-  - retry/backoff logic
+- unit tests exist for:
+  - CLI/config/logging utilities (`internal/cli`)
+  - protocol encoding/decoding and discovery helpers (`internal/roon`)
 - integration testing:
   - run against a local Roon Core on the same network
   - add a “mock mode” that replays captured `subscribe_zones` events for renderer iteration

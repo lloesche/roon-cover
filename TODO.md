@@ -4,10 +4,10 @@ This is a milestone-oriented plan for building **roon-cover**.
 
 ## Milestone 0 — Repo scaffold (today)
 
-- [ ] Add `README.md` (architecture + goals + dev notes)
-- [ ] Add this `TODO.md`
-- [ ] Decide initial project layout (likely `cmd/` + `internal/`)
-- [ ] Create initial `go.mod` and a placeholder `cmd/roon-cover/main.go`
+- [x] Add `README.md` (architecture + goals + dev notes)
+- [x] Add `TODO.md`
+- [x] Decide initial project layout (likely `cmd/` + `internal/`)
+- [x] Create initial `go.mod` and a placeholder `cmd/roon-cover/main.go`
 
 ## Milestone 1 — Minimal Roon extension (no rendering yet)
 

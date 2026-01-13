@@ -17,7 +17,7 @@ import (
 func newDisplayCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:   "display",
-		Short: "Open an 800x800 window and display the current cover art for the configured zone",
+		Short: "Open a window and display the current cover art for the configured zone",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runKiosk(cmd)
 		},
@@ -76,11 +76,7 @@ func runKiosk(cmd *cobra.Command) error {
 
 		var square SquareSize
 		// Seed an initial value so the first fetch works even before SDL reports output size.
-		if windowed {
-			square.UpdateFromOutput(nil, 800, 800)
-		} else {
-			square.UpdateFromOutput(nil, 800, 800)
-		}
+		square.UpdateFromOutput(nil, 800, 800)
 
 		// Keep SquareSize up to date with SDL output size changes.
 		go func() {
@@ -88,7 +84,10 @@ func runKiosk(cmd *cobra.Command) error {
 				select {
 				case <-ctx.Done():
 					return
-				case info := <-infoCh:
+				case info, ok := <-infoCh:
+					if !ok {
+						return
+					}
 					square.UpdateFromOutput(l, info.RenderWidth, info.RenderHeight)
 				}
 			}
@@ -190,13 +189,22 @@ func runKiosk(cmd *cobra.Command) error {
 	dispErr := disp.Run(ctx, updates)
 	cancel()
 
+	timer := time.NewTimer(300 * time.Millisecond)
+	defer timer.Stop()
+
 	select {
 	case subErr := <-errCh:
+		if !timer.Stop() {
+			select {
+			case <-timer.C:
+			default:
+			}
+		}
 		if dispErr != nil {
 			return dispErr
 		}
 		return subErr
-	case <-time.After(300 * time.Millisecond):
+	case <-timer.C:
 		return dispErr
 	}
 }
