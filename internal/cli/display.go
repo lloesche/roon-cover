@@ -69,6 +69,13 @@ func runKiosk(cmd *cobra.Command) error {
 	disp.InfoCh = infoCh
 	disp.FadeMS = viper.GetInt("display.fade_ms")
 	disp.Ease = viper.GetString("display.ease")
+	disp.FontPath = viper.GetString("display.font")
+	disp.FontSize = viper.GetInt("display.font_size")
+
+	showAll := viper.GetBool("display.show_all")
+	disp.ShowTitle = showAll || viper.GetBool("display.show_title")
+	disp.ShowArtist = showAll || viper.GetBool("display.show_artist")
+	disp.ShowAlbum = showAll || viper.GetBool("display.show_album")
 
 	if disp.FadeMS < 0 {
 		return fmt.Errorf("--fade-ms must be >= 0 (got %d)", disp.FadeMS)
@@ -77,6 +84,10 @@ func runKiosk(cmd *cobra.Command) error {
 		if _, err := display.EasingByName(disp.Ease); err != nil {
 			return err
 		}
+	}
+
+	if disp.FontSize < 6 || disp.FontSize > 256 {
+		return fmt.Errorf("--font-size must be in [6,256] (got %d)", disp.FontSize)
 	}
 
 	errCh := make(chan error, 1)
@@ -119,6 +130,7 @@ func runKiosk(cmd *cobra.Command) error {
 		var lastDownloaded roon.ImageKey
 		var lastFetchedSize int
 		var lastFetchAt time.Time
+		var lastTitle, lastArtist, lastAlbum string
 
 		err := client.SubscribeZones(ctx, core, func(update roon.ZoneUpdate) error {
 			for _, z := range update.Zones {
@@ -151,6 +163,11 @@ func runKiosk(cmd *cobra.Command) error {
 				keyChanged := key != prevKey
 				wantSize := square.Get()
 
+				metaChanged := np.Title != lastTitle || np.Artist != lastArtist || np.Album != lastAlbum
+				if metaChanged {
+					lastTitle, lastArtist, lastAlbum = np.Title, np.Artist, np.Album
+				}
+
 				// If the window/display grew a lot, refetch the current cover even if key unchanged.
 				// Debounced to avoid spam while resizing.
 				sizeBumped := wantSize > lastFetchedSize+64
@@ -159,6 +176,14 @@ func runKiosk(cmd *cobra.Command) error {
 
 				shouldFetch := ((justStartedPlaying || keyChanged) && key != lastDownloaded) || refetchForResize
 				if !shouldFetch {
+					// If metadata changed but the cover key didn't, still forward the update so overlays can refresh.
+					if metaChanged {
+						sendLatest(updates, display.Update{
+							Zone:       z.Name,
+							State:      z.State,
+							NowPlaying: np,
+						})
+					}
 					l.Debug("display: skip cover fetch", "zone", z.Name, "state", z.State, "image_key", key, "just_started", justStartedPlaying, "key_changed", keyChanged)
 					return nil
 				}

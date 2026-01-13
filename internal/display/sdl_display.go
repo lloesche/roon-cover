@@ -16,6 +16,7 @@ import (
 	"unsafe"
 
 	"github.com/veandco/go-sdl2/sdl"
+	"github.com/veandco/go-sdl2/ttf"
 )
 
 type SDLDisplay struct {
@@ -27,6 +28,13 @@ type SDLDisplay struct {
 	InfoCh       chan<- ScreenInfo
 	FadeMS       int
 	Ease         string
+
+	ShowTitle  bool
+	ShowArtist bool
+	ShowAlbum  bool
+
+	FontPath string
+	FontSize int
 }
 
 func (d *SDLDisplay) Run(ctx context.Context, updates <-chan Update) error {
@@ -62,6 +70,34 @@ func (d *SDLDisplay) Run(ctx context.Context, updates <-chan Update) error {
 		return err
 	}
 	defer sdl.Quit()
+
+	if err := ttf.Init(); err != nil {
+		return err
+	}
+	defer ttf.Quit()
+
+	fontPath, err := resolveFontPath(d.FontPath)
+	if err != nil {
+		// Only require a font if overlay is enabled.
+		if d.ShowTitle || d.ShowArtist || d.ShowAlbum {
+			return err
+		}
+		fontPath = ""
+	}
+	fontSize := d.FontSize
+	if fontSize <= 0 {
+		fontSize = 28
+	}
+
+	var font *ttf.Font
+	if fontPath != "" && (d.ShowTitle || d.ShowArtist || d.ShowAlbum) {
+		f, err := ttf.OpenFont(fontPath, fontSize)
+		if err != nil {
+			return err
+		}
+		font = f
+		defer font.Close()
+	}
 
 	// Log available displays at startup.
 	numDisplays, err := sdl.GetNumVideoDisplays()
@@ -163,8 +199,26 @@ func (d *SDLDisplay) Run(ctx context.Context, updates <-chan Update) error {
 	var currW, currH int32
 	var prevW, prevH int32
 
-	var fading bool
-	var fadeStart time.Time
+	// Text overlay state (optional).
+	var currTextTex *sdl.Texture
+	var prevTextTex *sdl.Texture
+	var currTextW, currTextH int32
+	var prevTextW, prevTextH int32
+	var currTextLines []string
+	defer func() {
+		if currTextTex != nil {
+			currTextTex.Destroy()
+		}
+		if prevTextTex != nil {
+			prevTextTex.Destroy()
+		}
+	}()
+
+	var coverFading bool
+	var coverFadeStart time.Time
+
+	var textFading bool
+	var textFadeStart time.Time
 
 	alphaU8 := func(v float64) uint8 {
 		if v <= 0 {
@@ -208,6 +262,51 @@ func (d *SDLDisplay) Run(ctx context.Context, updates <-chan Update) error {
 			}
 		}
 
+		// Draw text overlay (with matching fade alphas).
+		drawText := func(tex *sdl.Texture, tw, th int32, alpha uint8) error {
+			if tex == nil || tw <= 0 || th <= 0 {
+				return nil
+			}
+			_ = tex.SetAlphaMod(alpha)
+			pad := int32(24)
+			x := pad
+			y := int32(wh) - pad - th
+			dst := sdl.Rect{X: x, Y: y, W: tw, H: th}
+
+			return ren.Copy(tex, nil, &dst)
+		}
+
+		// Text fade can be driven either by a cover fade (when both change) or by a text-only fade.
+		// Prefer the cover fade when active so text stays in sync with cover transitions.
+		switch {
+		case coverFading && fadeDur > 0 && prevTextTex != nil && currTextTex != nil:
+			t := float64(time.Since(coverFadeStart)) / float64(fadeDur)
+			e := clamp01(ease(t))
+			aPrev := alphaU8(1 - e)
+			aCurr := alphaU8(e)
+			if err := drawText(prevTextTex, prevTextW, prevTextH, aPrev); err != nil {
+				return err
+			}
+			if err := drawText(currTextTex, currTextW, currTextH, aCurr); err != nil {
+				return err
+			}
+		case textFading && fadeDur > 0 && prevTextTex != nil && currTextTex != nil:
+			t := float64(time.Since(textFadeStart)) / float64(fadeDur)
+			e := clamp01(ease(t))
+			aPrev := alphaU8(1 - e)
+			aCurr := alphaU8(e)
+			if err := drawText(prevTextTex, prevTextW, prevTextH, aPrev); err != nil {
+				return err
+			}
+			if err := drawText(currTextTex, currTextW, currTextH, aCurr); err != nil {
+				return err
+			}
+		default:
+			if err := drawText(currTextTex, currTextW, currTextH, 255); err != nil {
+				return err
+			}
+		}
+
 		ren.Present()
 		return nil
 	}
@@ -229,6 +328,64 @@ func (d *SDLDisplay) Run(ctx context.Context, updates <-chan Update) error {
 			if !ok {
 				return nil
 			}
+
+			textChanged := false
+
+			// Update text overlay (if enabled) whenever metadata changes.
+			if font != nil && (d.ShowTitle || d.ShowArtist || d.ShowAlbum) {
+				lines := buildOverlayLines(u.NowPlaying, d.ShowTitle, d.ShowArtist, d.ShowAlbum)
+				sameText := sameLines(lines, currTextLines)
+
+				// If there's no text to show, clear any existing overlay.
+				if len(lines) == 0 {
+					if currTextTex != nil {
+						currTextTex.Destroy()
+						currTextTex = nil
+					}
+					if prevTextTex != nil {
+						prevTextTex.Destroy()
+						prevTextTex = nil
+					}
+					currTextW, currTextH = 0, 0
+					prevTextW, prevTextH = 0, 0
+					currTextLines = nil
+					textChanged = true
+					textFading = false
+				} else if !sameText {
+					newTextTex, newTW, newTH, err := renderTextBlock(ren, font, lines)
+					if err == nil {
+						immediate := u.NoFade || fadeDur <= 0 || currTextTex == nil
+						if immediate {
+							if prevTextTex != nil {
+								prevTextTex.Destroy()
+								prevTextTex = nil
+							}
+							if currTextTex != nil {
+								currTextTex.Destroy()
+								currTextTex = nil
+							}
+							currTextTex, currTextW, currTextH = newTextTex, newTW, newTH
+							currTextLines = lines
+							textFading = false
+						} else {
+							if prevTextTex != nil {
+								prevTextTex.Destroy()
+								prevTextTex = nil
+							}
+							prevTextTex, prevTextW, prevTextH = currTextTex, currTextW, currTextH
+
+							currTextTex, currTextW, currTextH = newTextTex, newTW, newTH
+							currTextLines = lines
+
+							// Text-only transition: fade between the previous and current text.
+							textFadeStart = time.Now()
+							textFading = true
+						}
+						textChanged = true
+					}
+				}
+			}
+
 			if len(u.CoverImage) > 0 {
 				img, _, err := image.Decode(bytes.NewReader(u.CoverImage))
 				if err != nil {
@@ -271,7 +428,7 @@ func (d *SDLDisplay) Run(ctx context.Context, updates <-chan Update) error {
 					currTex = newTex
 					currW, currH = newW, newH
 					_ = currTex.SetAlphaMod(255)
-					fading = false
+					coverFading = false
 				} else {
 					// If a previous fade is in-flight, discard the older prevTex to avoid leaks.
 					if prevTex != nil {
@@ -285,8 +442,8 @@ func (d *SDLDisplay) Run(ctx context.Context, updates <-chan Update) error {
 					_ = prevTex.SetAlphaMod(255)
 					_ = currTex.SetAlphaMod(0)
 
-					fadeStart = time.Now()
-					fading = true
+					coverFadeStart = time.Now()
+					coverFading = true
 				}
 
 				if err := render(); err != nil {
@@ -294,15 +451,19 @@ func (d *SDLDisplay) Run(ctx context.Context, updates <-chan Update) error {
 				}
 			}
 
-			// TODO: overlay text (title/artist/album) via SDL_ttf or bitmap font.
-			// u.NowPlaying already contains the fields we need.
+			// Text-only update (same cover, new metadata) should repaint immediately.
+			if textChanged && len(u.CoverImage) == 0 {
+				if err := render(); err != nil {
+					return err
+				}
+			}
 
 		case <-eventsTick.C:
 			// Progress fade (if active).
-			if fading && fadeDur > 0 && prevTex != nil && currTex != nil {
-				t := float64(time.Since(fadeStart)) / float64(fadeDur)
+			if coverFading && fadeDur > 0 && prevTex != nil && currTex != nil {
+				t := float64(time.Since(coverFadeStart)) / float64(fadeDur)
 				if t >= 1 {
-					fading = false
+					coverFading = false
 					prevTex.Destroy()
 					prevTex = nil
 					_ = currTex.SetAlphaMod(255)
@@ -313,6 +474,24 @@ func (d *SDLDisplay) Run(ctx context.Context, updates <-chan Update) error {
 					e := clamp01(ease(t))
 					_ = prevTex.SetAlphaMod(alphaU8(1 - e))
 					_ = currTex.SetAlphaMod(alphaU8(e))
+					if err := render(); err != nil {
+						return err
+					}
+				}
+			}
+
+			// Progress text-only fade (if active).
+			if textFading && fadeDur > 0 && prevTextTex != nil && currTextTex != nil {
+				t := float64(time.Since(textFadeStart)) / float64(fadeDur)
+				if t >= 1 {
+					textFading = false
+					prevTextTex.Destroy()
+					prevTextTex = nil
+					if err := render(); err != nil {
+						return err
+					}
+				} else {
+					// Keep redrawing while fading (alphas are computed in render()).
 					if err := render(); err != nil {
 						return err
 					}

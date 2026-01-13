@@ -80,6 +80,7 @@ Key flags:
 
 SDL build tag:
 - The SDL renderer is built behind the `sdl` build tag (see `internal/display/sdl_display.go`).
+- Text overlays use SDL_ttf; ensure SDL2_ttf is installed on your system when building with `-tags sdl`.
 
 ## Development notes
 
