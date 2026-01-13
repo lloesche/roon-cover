@@ -17,9 +17,11 @@ import (
 )
 
 type SDLDisplay struct {
-	Width  int
-	Height int
-	Title  string
+	Width        int
+	Height       int
+	Title        string
+	Fullscreen   bool
+	DisplayIndex int
 }
 
 func (d *SDLDisplay) Run(ctx context.Context, updates <-chan Update) error {
@@ -41,11 +43,54 @@ func (d *SDLDisplay) Run(ctx context.Context, updates <-chan Update) error {
 	}
 	defer sdl.Quit()
 
-	win, err := sdl.CreateWindow(title, sdl.WINDOWPOS_CENTERED, sdl.WINDOWPOS_CENTERED, int32(w), int32(h), sdl.WINDOW_SHOWN)
+	// Log available displays at startup.
+	numDisplays, err := sdl.GetNumVideoDisplays()
+	if err == nil && numDisplays > 0 {
+		for i := 0; i < numDisplays; i++ {
+			name, nameErr := sdl.GetDisplayName(i)
+			if nameErr != nil {
+				name = "unknown"
+			}
+			b, bErr := sdl.GetDisplayBounds(i)
+			if bErr != nil {
+				continue
+			}
+			sdl.Log("display[%d]=%s bounds=%dx%d+%d+%d", i, name, b.W, b.H, b.X, b.Y)
+		}
+	}
+
+	displayIndex := d.DisplayIndex
+	if err != nil {
+		sdl.LogWarn(sdl.LOG_CATEGORY_APPLICATION, "failed to enumerate SDL displays, defaulting to display 0: %v", err)
+		displayIndex = 0
+	} else if displayIndex < 0 || displayIndex >= numDisplays {
+		sdl.LogWarn(sdl.LOG_CATEGORY_APPLICATION, "requested display %d is out of range (0..%d), falling back to 0", displayIndex, numDisplays-1)
+		displayIndex = 0
+	}
+	sdl.Log("using display index %d", displayIndex)
+	bounds, err := sdl.GetDisplayBounds(displayIndex)
+	if err != nil {
+		bounds = sdl.Rect{X: sdl.WINDOWPOS_CENTERED, Y: sdl.WINDOWPOS_CENTERED, W: int32(w), H: int32(h)}
+	}
+
+	win, err := sdl.CreateWindow(title, bounds.X, bounds.Y, int32(w), int32(h), sdl.WINDOW_SHOWN)
 	if err != nil {
 		return err
 	}
 	defer win.Destroy()
+
+	// Place the window on the chosen display before entering fullscreen.
+	// (In windowed mode, this still picks the right screen.)
+	if bounds.X != sdl.WINDOWPOS_CENTERED && bounds.Y != sdl.WINDOWPOS_CENTERED {
+		win.SetPosition(bounds.X, bounds.Y)
+	}
+
+	if d.Fullscreen {
+		// Fullscreen desktop preserves the display mode and avoids mode switches.
+		if err := win.SetFullscreen(sdl.WINDOW_FULLSCREEN_DESKTOP); err != nil {
+			return err
+		}
+	}
 
 	ren, err := sdl.CreateRenderer(win, -1, sdl.RENDERER_ACCELERATED|sdl.RENDERER_PRESENTVSYNC)
 	if err != nil {
@@ -63,6 +108,11 @@ func (d *SDLDisplay) Run(ctx context.Context, updates <-chan Update) error {
 	var texW, texH int32
 
 	render := func() error {
+		ww, wh, err := ren.GetOutputSize()
+		if err != nil {
+			return err
+		}
+
 		// Clear background.
 		_ = ren.SetDrawColor(0, 0, 0, 255)
 		if err := ren.Clear(); err != nil {
@@ -70,8 +120,7 @@ func (d *SDLDisplay) Run(ctx context.Context, updates <-chan Update) error {
 		}
 
 		if tex != nil {
-			ww, wh := int32(w), int32(h)
-			dst := fitRect(texW, texH, ww, wh)
+			dst := fitRect(texW, texH, int32(ww), int32(wh))
 			if err := ren.Copy(tex, nil, &dst); err != nil {
 				return err
 			}

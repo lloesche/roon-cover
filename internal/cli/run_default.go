@@ -64,6 +64,11 @@ func runDefault(cmd *cobra.Command) error {
 		l.Info("paired and saved credentials", "core", core.Name)
 	}
 
+	// Validate zone exists (avoid subscribing to a typo / flag-value like "-h").
+	if err := validateZoneExists(ctx, client, core, zoneName); err != nil {
+		return err
+	}
+
 	l.Info("subscribing to zone", "zone", zoneName)
 	downloadToTemp := viper.GetBool("download.to_temp")
 	var lastKey roon.ImageKey

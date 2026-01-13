@@ -25,6 +25,8 @@ type rootFlags struct {
 
 	PprofAddr      string
 	DownloadToTemp bool
+	Window         bool
+	DisplayIndex   int
 }
 
 func newRootCmd(ctx context.Context) *cobra.Command {
@@ -53,8 +55,8 @@ func newRootCmd(ctx context.Context) *cobra.Command {
 		},
 		RunE: func(cmd *cobra.Command, args []string) error {
 			// Default behavior when no subcommand is provided:
-			// resolve core, pair/auth, then subscribe to the configured zone.
-			return runDefault(cmd)
+			// run kiosk/display mode for the configured zone.
+			return runKiosk(cmd)
 		},
 	}
 
@@ -65,6 +67,8 @@ func newRootCmd(ctx context.Context) *cobra.Command {
 	cmd.PersistentFlags().StringVar(&flags.ZoneName, "roon-zone", "", "target zone name (or set via ROON_COVER_ROON_ZONE)")
 	cmd.PersistentFlags().StringVar(&flags.PprofAddr, "pprof-addr", "", "start pprof server on addr (e.g. 127.0.0.1:6060)")
 	cmd.PersistentFlags().BoolVar(&flags.DownloadToTemp, "download-to-temp", false, "download cover art into the OS temp directory and log the file path")
+	cmd.PersistentFlags().BoolVar(&flags.Window, "window", false, "run windowed (800x800) instead of fullscreen")
+	cmd.PersistentFlags().IntVar(&flags.DisplayIndex, "display", 0, "SDL display index to show on (0-based)")
 
 	// Current config keys:
 	// - roon.core
@@ -72,6 +76,8 @@ func newRootCmd(ctx context.Context) *cobra.Command {
 	_ = viper.BindPFlag("roon.core", cmd.PersistentFlags().Lookup("roon-core"))
 	_ = viper.BindPFlag("roon.zone", cmd.PersistentFlags().Lookup("roon-zone"))
 	_ = viper.BindPFlag("download.to_temp", cmd.PersistentFlags().Lookup("download-to-temp"))
+	_ = viper.BindPFlag("display.window", cmd.PersistentFlags().Lookup("window"))
+	_ = viper.BindPFlag("display.index", cmd.PersistentFlags().Lookup("display"))
 
 	cmd.AddCommand(newVersionCmd())
 	cmd.AddCommand(newRoonCmd())
@@ -92,6 +98,8 @@ func initConfig(configPath string) error {
 	viper.SetDefault("roon.core", "")
 	viper.SetDefault("roon.zone", "")
 	viper.SetDefault("download.to_temp", false)
+	viper.SetDefault("display.window", false)
+	viper.SetDefault("display.index", 0)
 
 	if configPath == "" {
 		return nil

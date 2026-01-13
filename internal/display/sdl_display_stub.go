@@ -8,9 +8,11 @@ import (
 )
 
 type SDLDisplay struct {
-	Width  int
-	Height int
-	Title  string
+	Width        int
+	Height       int
+	Title        string
+	Fullscreen   bool
+	DisplayIndex int
 }
 
 func (d *SDLDisplay) Run(ctx context.Context, updates <-chan Update) error {

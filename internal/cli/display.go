@@ -19,138 +19,151 @@ func newDisplayCmd() *cobra.Command {
 		Use:   "display",
 		Short: "Open an 800x800 window and display the current cover art for the configured zone",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			ctx, cancel := context.WithCancel(cmd.Context())
-			defer cancel()
+			return runKiosk(cmd)
+		},
+	}
+}
 
-			l := LoggerFromContext(ctx)
+// runKiosk is the default mode: subscribe to a single configured zone and display its cover art.
+func runKiosk(cmd *cobra.Command) error {
+	ctx, cancel := context.WithCancel(cmd.Context())
+	defer cancel()
 
-			zoneName := strings.TrimSpace(viper.GetString("roon.zone"))
-			if zoneName == "" {
-				return errors.New("missing zone: set --roon-zone / ROON_COVER_ROON_ZONE / config roon.zone")
-			}
+	l := LoggerFromContext(ctx)
 
-			client := roon.NewClient(roon.Config{DisplayName: "roon-cover"}, roon.WithLogger(l))
+	zoneName := strings.TrimSpace(viper.GetString("roon.zone"))
+	if zoneName == "" {
+		return errors.New("missing zone: set --roon-zone / ROON_COVER_ROON_ZONE / config roon.zone")
+	}
 
-			core, err := ensureCoreAndPaired(cmd, client)
-			if err != nil {
-				return err
-			}
+	downloadToTemp := viper.GetBool("download.to_temp")
 
-			updates := make(chan display.Update, 2)
+	client := roon.NewClient(roon.Config{DisplayName: "roon-cover"}, roon.WithLogger(l))
 
-			disp := &display.SDLDisplay{
-				Width:  800,
-				Height: 800,
-				Title:  fmt.Sprintf("roon-cover — %s", zoneName),
-			}
+	core, err := ensureCoreAndPaired(cmd, client)
+	if err != nil {
+		return err
+	}
 
-			errCh := make(chan error, 1)
+	// Validate zone exists before we open the window and subscribe.
+	if err := validateZoneExists(ctx, client, core, zoneName); err != nil {
+		return err
+	}
 
-			// Producer loop: subscribe zones, fetch covers on change, send updates.
-			go func() {
-				defer close(updates)
+	updates := make(chan display.Update, 2)
 
-				var zlog ZoneStatusLogger
-				var lastKey roon.ImageKey
-				var lastState roon.ZoneState
-				var lastDownloaded roon.ImageKey
+	disp := &display.SDLDisplay{
+		Title: fmt.Sprintf("roon-cover — %s", zoneName),
+	}
 
-				err := client.SubscribeZones(ctx, core, func(update roon.ZoneUpdate) error {
-					for _, z := range update.Zones {
-						if !strings.EqualFold(strings.TrimSpace(z.Name), zoneName) {
-							continue
-						}
+	windowed := viper.GetBool("display.window")
+	if windowed {
+		disp.Width = 800
+		disp.Height = 800
+		disp.Fullscreen = false
+	} else {
+		disp.Fullscreen = true
+	}
+	disp.DisplayIndex = viper.GetInt("display.index")
 
-						np := z.NowPlaying
-						key := roon.ImageKey("")
-						if np != nil {
-							key = np.ImageKey
-						}
+	errCh := make(chan error, 1)
 
-						prevState := lastState
-						prevKey := lastKey
+	// Producer loop: subscribe zones, fetch covers on change, send updates.
+	go func() {
+		defer close(updates)
 
-						// Update local state after capturing previous values.
-						lastState = z.State
-						lastKey = key
+		var zlog ZoneStatusLogger
+		var lastKey roon.ImageKey
+		var lastState roon.ZoneState
+		var lastDownloaded roon.ImageKey
 
-						// Send metadata-only updates when state/track changes (future: overlay).
-						if np != nil && (z.State != prevState || key != prevKey) {
-							sendLatest(updates, display.Update{
-								Zone:       z.Name,
-								State:      z.State,
-								NowPlaying: np,
-							})
-						}
+		err := client.SubscribeZones(ctx, core, func(update roon.ZoneUpdate) error {
+			for _, z := range update.Zones {
+				if !strings.EqualFold(strings.TrimSpace(z.Name), zoneName) {
+					continue
+				}
 
-						// Always log zone status transitions while in display mode.
-						zlog.Observe(l, z)
+				np := z.NowPlaying
+				key := roon.ImageKey("")
+				if np != nil {
+					key = np.ImageKey
+				}
 
-						// Only fetch/display covers when zone is actually playing.
-						if z.State != roon.ZoneStatePlaying || key == "" || np == nil {
-							return nil
-						}
+				prevState := lastState
+				prevKey := lastKey
 
-						justStartedPlaying := prevState != roon.ZoneStatePlaying && z.State == roon.ZoneStatePlaying
-						keyChanged := key != prevKey
-						shouldFetch := (justStartedPlaying || keyChanged) && key != lastDownloaded
-						if !shouldFetch {
-							l.Debug("display: skip cover fetch", "zone", z.Name, "state", z.State, "image_key", key, "just_started", justStartedPlaying, "key_changed", keyChanged)
-							return nil
-						}
+				// Update local state after capturing previous values.
+				lastState = z.State
+				lastKey = key
 
-						l.Debug("display: fetching cover", "zone", z.Name, "state", z.State, "image_key", key, "just_started", justStartedPlaying, "key_changed", keyChanged)
-						img, mime, err := client.FetchImage(ctx, core, key, roon.ImageFetchOptions{Size: 800})
-						if err != nil {
-							l.Warn("fetch image failed", "err", err, "image_key", key)
-							return nil
-						}
+				// Always log zone status transitions in kiosk mode.
+				zlog.Observe(l, z)
 
-						lastDownloaded = key
-						sendLatest(updates, display.Update{
-							Zone:          z.Name,
-							State:         z.State,
-							NowPlaying:    np,
-							CoverImage:    img,
-							CoverMimeType: mime,
-						})
-
-						return nil
-					}
+				// Only fetch/display covers when zone is actually playing.
+				if z.State != roon.ZoneStatePlaying || key == "" || np == nil {
 					return nil
+				}
+
+				justStartedPlaying := prevState != roon.ZoneStatePlaying && z.State == roon.ZoneStatePlaying
+				keyChanged := key != prevKey
+				shouldFetch := (justStartedPlaying || keyChanged) && key != lastDownloaded
+				if !shouldFetch {
+					l.Debug("display: skip cover fetch", "zone", z.Name, "state", z.State, "image_key", key, "just_started", justStartedPlaying, "key_changed", keyChanged)
+					return nil
+				}
+
+				l.Debug("display: fetching cover", "zone", z.Name, "state", z.State, "image_key", key, "just_started", justStartedPlaying, "key_changed", keyChanged)
+				img, mime, err := client.FetchImage(ctx, core, key, roon.ImageFetchOptions{Size: 800})
+				if err != nil {
+					l.Warn("fetch image failed", "err", err, "image_key", key)
+					return nil
+				}
+
+				lastDownloaded = key
+				sendLatest(updates, display.Update{
+					Zone:          z.Name,
+					State:         z.State,
+					NowPlaying:    np,
+					CoverImage:    img,
+					CoverMimeType: mime,
 				})
 
-				// If ctx cancelled, treat as graceful.
-				if err == nil || errors.Is(err, context.Canceled) {
-					select {
-					case errCh <- nil:
-					default:
-					}
-					return
+				if downloadToTemp {
+					// For now, reuse the existing helper (it re-fetches); we'll optimize to avoid double fetch later.
+					maybeDownloadCoverToTemp(ctx, l, client, core, z)
 				}
-				select {
-				case errCh <- err:
-				default:
-				}
-			}()
 
-			// IMPORTANT: SDL/Cocoa must run on the main thread on macOS.
-			// So we run the display loop on this goroutine, and keep the Roon subscription
-			// in the background goroutine above.
-			dispErr := disp.Run(ctx, updates)
-			cancel()
-
-			select {
-			case subErr := <-errCh:
-				if dispErr != nil {
-					return dispErr
-				}
-				return subErr
-			case <-time.After(300 * time.Millisecond):
-				// Best-effort shutdown.
-				return dispErr
+				return nil
 			}
-		},
+			return nil
+		})
+
+		// If ctx cancelled, treat as graceful.
+		if err == nil || errors.Is(err, context.Canceled) {
+			select {
+			case errCh <- nil:
+			default:
+			}
+			return
+		}
+		select {
+		case errCh <- err:
+		default:
+		}
+	}()
+
+	// IMPORTANT: SDL/Cocoa must run on the main thread on macOS.
+	dispErr := disp.Run(ctx, updates)
+	cancel()
+
+	select {
+	case subErr := <-errCh:
+		if dispErr != nil {
+			return dispErr
+		}
+		return subErr
+	case <-time.After(300 * time.Millisecond):
+		return dispErr
 	}
 }
 
