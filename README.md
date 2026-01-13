@@ -1,116 +1,124 @@
-# roon-cover
+# roon-cover 🎛️🖼️
 
-Show the **Roon cover art** of the currently playing track (per zone) on an attached **HDMI display**.
+Turn any screen into a **“Now Playing” cover art display** for your **Roon** zone.
 
-Primary target: **Raspberry Pi Zero W**  
-Current dev environment: **macOS**
+- 🖥️ **Fullscreen cover art** (perfect for an HDMI display / wall screen)
+- ✨ **Smooth transitions** (crossfade + easing)
+- 📝 Optional **title / artist / album** overlay with a soft shadow
+- 🪄 Works great as a simple “kiosk mode” companion for a listening room
 
-## Goals (initial scope)
+> Tip: if you just want to try it out, start in windowed mode first.
 
-Build two main components:
+---
 
-- **Roon extension (Go)** that supports only:
-  - discovery
-  - pairing
-  - `transport.subscribe_zones`
-  - image service fetch (fetch cover art bytes given an image key)
-- **Renderer (Go)** that displays the current cover art on a screen.
+## What it does ✅
 
-## High-level architecture
+`roon-cover` connects to your Roon Core, watches a selected zone, and shows the current track’s cover art (plus optional text) in a clean, distraction-free window.
 
-1. **Roon Core** announces itself on the network (discovery).
-2. Our **extension** connects, handles **pairing**, then subscribes to zone updates via `transport.subscribe_zones`.
-3. For the active zone, we detect the currently playing track and its **image key**.
-4. We fetch the cover art bytes via the **Roon Image service**.
-5. The **renderer** displays the image fullscreen, optionally with effects (fade in/out, crossfade, etc.).
+On first run, Roon will ask you to **authorize / pair** the extension.
 
-Proposed process split (can start in one process and split later if needed):
+---
 
-- `cmd/roon-cover` (single binary) with internal packages:
-  - `internal/roon/` (discovery, pairing, subscribe_zones, image fetch)
-  - `internal/cli/` (Cobra CLI, config/logging, kiosk orchestration)
-  - `internal/display/` (SDL2 renderer; build-tagged, see below)
+## Quick start 🚀
 
-## Renderer choice: SDL vs DRM/KMS
+### 1) Install
 
-We’ll start with **SDL2**:
+If you have Go installed:
 
-- portable across macOS/Linux
-- easiest path to effects/animations
-- lets us iterate without Pi-specific graphics complexity
+```bash
+go install ./cmd/roon-cover
+```
 
-Later we can consider a DRM/KMS backend for minimal dependencies and faster boot, but that’s best after the Roon side is stable.
+Or from the repo root:
 
-## Key product behaviors (MVP)
+```bash
+go run ./cmd/roon-cover --help
+```
 
-- Select a target **zone** by name (config flag/env var).
-- When the zone is playing and cover art exists:
-  - fetch image
-  - display fullscreen
-- When the track changes:
-  - fetch new image
-  - fade/crossfade to new cover (optional; can be phase 2)
-- Handle reconnects:
-  - Roon Core restarts
-  - Wi‑Fi drops on Pi
-  - pairing token refresh
+### 2) Run it (windowed)
 
-## Configuration
+```bash
+roon-cover --roon-zone "Living Room" --window
+```
 
-- **Zone selection**: zone name (exact match) or a stable zone identifier if available.
-- **Display**: fullscreen mode, target display index, background color.
-- **Image**: preferred size (e.g. 600px/800px), cache size, fetch timeout.
-- **Logging**: verbose/debug mode.
+### 3) Run it (fullscreen)
 
-We currently support:
-- CLI flags (run `roon-cover --help`)
-- environment variables (prefix `ROON_COVER_`, e.g. `ROON_COVER_ROON_ZONE`)
-- optional config file via `--config` (any Viper-supported format)
+```bash
+roon-cover --roon-zone "Living Room"
+```
 
-Key flags:
-- `--roon-core` / `ROON_COVER_ROON_CORE`
-- `--roon-zone` / `ROON_COVER_ROON_ZONE`
-- `--display` (SDL display index, 0-based)
-- `--window` (800x800 windowed instead of fullscreen)
-- `--fade-ms` (crossfade duration for cover changes; 0 disables)
-- `--ease` (easing function name for fades)
-- `--download-to-temp` (write latest cover to temp dir for debugging)
-- `--log-level`, `--log-format`
-- `--pprof-addr` (optional local profiling server)
+---
 
-SDL build tag:
-- The SDL renderer is built behind the `sdl` build tag (see `internal/display/sdl_display.go`).
-- Text overlays use SDL_ttf; ensure SDL2_ttf is installed on your system when building with `-tags sdl`.
+## Usage examples ✨
 
-## Development notes
+### Pick a specific Roon Core
 
-### Roon extension protocol
+```bash
+roon-cover --roon-core "My Roon Core" --roon-zone "Living Room"
+```
 
-We implement a minimal subset of the Roon extension API:
+### Choose a display (fullscreen)
 
-- discovery (find Core on LAN)
-- pairing (authorize our extension)
-- `transport.subscribe_zones` (stream zone state changes)
-- image fetch (retrieve cover art bytes)
+```bash
+roon-cover --roon-zone "Living Room" --display 1
+```
 
-### Testing strategy
+### Cover crossfade + easing
 
-- unit tests exist for:
-  - CLI/config/logging utilities (`internal/cli`)
-  - protocol encoding/decoding and discovery helpers (`internal/roon`)
-- integration testing:
-  - run against a local Roon Core on the same network
-  - add a “mock mode” that replays captured `subscribe_zones` events for renderer iteration
+```bash
+roon-cover --roon-zone "Living Room" --fade-ms 500 --ease in-out-sine
+```
 
-## Raspberry Pi Zero W considerations (planned)
+### Show text overlays
 
-- ARMv6 (Pi Zero W) constraints: CPU/memory are tight; avoid heavy deps.
-- Wi‑Fi reliability: robust reconnect and backoff.
-- Startup: systemd service, autostart on boot.
-- SDL2 on Pi: ensure we can use the right video driver (kmsdrm or framebuffer) and disable unnecessary compositing.
-- Image decoding: prefer efficient decoders and cache scaled textures.
+```bash
+roon-cover --roon-zone "Living Room" --show-all
+```
 
-## Roadmap
+### Customize font + faster text transitions
 
-See `TODO.md` for a milestone-based plan.
+```bash
+roon-cover --roon-zone "Living Room" --show-all --font "/path/to/font.ttf" --font-size 28 --font-fade-ms 200
+```
+
+---
+
+## Common options 🎚️
+
+Run `roon-cover --help` for the full list. The most useful ones:
+
+- **Zone / core**
+  - `--roon-zone`: the zone to follow (required)
+  - `--roon-core`: optional, helps if you have multiple cores
+- **Display**
+  - `--window`: run windowed (handy for testing)
+  - `--display`: choose which display to use (0-based)
+- **Transitions**
+  - `--fade-ms`: cover crossfade duration (0 disables)
+  - `--ease`: easing function name (e.g. `in-sine`, `out-quad`, `in-out-sine`, `out-elastic`, `out-bounce`)
+  - `--font-fade-ms`: text transition duration (0 disables; independent from cover fade)
+- **Text overlay**
+  - `--show-title`, `--show-artist`, `--show-album`, `--show-all`
+  - `--font`, `--font-size`
+
+---
+
+## Troubleshooting 🧰
+
+### “I don’t see anything / it closes immediately”
+
+- Make sure the zone name is correct: `--roon-zone "…"`
+- Try windowed mode first: `--window`
+- Run with logs: `--log-level debug`
+
+### “It can’t find my Core”
+
+- Put the machine running `roon-cover` on the **same network** as your Roon Core.
+- If you have multiple Cores, specify one with `--roon-core`.
+
+---
+
+## License 📄
+
+MIT (see `LICENSE` if present).
 
