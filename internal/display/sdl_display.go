@@ -651,13 +651,12 @@ func (d *SDLDisplay) Run(ctx context.Context, updates <-chan Update) error {
 				if e == nil {
 					break
 				}
-				switch e.(type) {
+				switch e := e.(type) {
 				case *sdl.QuitEvent:
 					return nil
 				case *sdl.WindowEvent:
-					we := e.(*sdl.WindowEvent)
 					// Keep output-size info up to date (window resize, display changes, etc.).
-					switch we.Event {
+					switch e.Event {
 					case sdl.WINDOWEVENT_FOCUS_GAINED:
 						if d.Fullscreen {
 							sdl.ShowCursor(sdl.DISABLE)
