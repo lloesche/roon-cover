@@ -63,6 +63,13 @@ roon-cover --roon-core "My Roon Core" --roon-zone "Living Room"
 roon-cover --roon-zone "Living Room" --display 1
 ```
 
+### Switch zones with the keyboard ⌨️
+
+When the window is focused, use:
+
+- ⬅️ Left Arrow: previous zone
+- ➡️ Right Arrow: next zone
+
 ### Cover crossfade + easing
 
 ```bash

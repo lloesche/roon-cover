@@ -27,3 +27,15 @@ type ScreenInfo struct {
 	RenderWidth  int
 	RenderHeight int
 }
+
+type EventKind int
+
+const (
+	EventPrevZone EventKind = iota + 1
+	EventNextZone
+)
+
+// Event is sent from the renderer (SDL) back to the producer (CLI) for user interactions.
+type Event struct {
+	Kind EventKind
+}

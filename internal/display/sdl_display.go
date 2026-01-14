@@ -26,6 +26,7 @@ type SDLDisplay struct {
 	Fullscreen   bool
 	DisplayIndex int
 	InfoCh       chan<- ScreenInfo
+	EventCh      chan<- Event
 	FadeMS       int
 	Ease         string
 
@@ -671,6 +672,29 @@ func (d *SDLDisplay) Run(ctx context.Context, updates <-chan Update) error {
 						// Ensure the current texture is repainted at the new size.
 						if err := render(); err != nil {
 							return err
+						}
+					}
+				case *sdl.KeyboardEvent:
+					if d.EventCh == nil {
+						break
+					}
+					// Only react on key down (and ignore repeats).
+					if e.Type != sdl.KEYDOWN || e.Repeat != 0 {
+						break
+					}
+					var kind EventKind
+					switch e.Keysym.Sym {
+					case sdl.K_LEFT:
+						kind = EventPrevZone
+					case sdl.K_RIGHT:
+						kind = EventNextZone
+					default:
+						break
+					}
+					if kind != 0 {
+						select {
+						case d.EventCh <- Event{Kind: kind}:
+						default:
 						}
 					}
 				}

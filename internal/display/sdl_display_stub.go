@@ -14,6 +14,7 @@ type SDLDisplay struct {
 	Fullscreen   bool
 	DisplayIndex int
 	InfoCh       chan<- ScreenInfo
+	EventCh      chan<- Event
 	FadeMS       int
 	Ease         string
 
