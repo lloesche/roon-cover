@@ -75,7 +75,7 @@ func newRootCmd(ctx context.Context) *cobra.Command {
 	cmd.PersistentFlags().StringVar(&flags.LogFormat, "log-format", "text", "log format: text|json")
 	cmd.PersistentFlags().StringVar(&flags.LogLevel, "log-level", "info", "log level: debug|info|warn|error")
 	cmd.PersistentFlags().StringVar(&flags.CoreName, "roon-core", "", "Roon Core name (or set via ROON_COVER_ROON_CORE)")
-	cmd.PersistentFlags().StringVar(&flags.ZoneName, "roon-zone", "", "target zone name (or set via ROON_COVER_ROON_ZONE)")
+	cmd.PersistentFlags().StringVar(&flags.ZoneName, "roon-zone", "", "target zone name (optional; if omitted uses the first available zone)")
 	cmd.PersistentFlags().StringVar(&flags.PprofAddr, "pprof-addr", "", "start pprof server on addr (e.g. 127.0.0.1:6060)")
 	cmd.PersistentFlags().BoolVar(&flags.DownloadToTemp, "download-to-temp", false, "download cover art into the OS temp directory and log the file path")
 	cmd.PersistentFlags().BoolVar(&flags.Window, "window", false, "run windowed (800x800) instead of fullscreen")

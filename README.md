@@ -88,7 +88,7 @@ roon-cover --roon-zone "Living Room" --show-all --font "/path/to/font.ttf" --fon
 Run `roon-cover --help` for the full list. The most useful ones:
 
 - **Zone / core**
-  - `--roon-zone`: the zone to follow (required)
+  - `--roon-zone`: the zone to follow (optional; if omitted, the first available zone is used)
   - `--roon-core`: optional, helps if you have multiple cores
 - **Display**
   - `--window`: run windowed (handy for testing)

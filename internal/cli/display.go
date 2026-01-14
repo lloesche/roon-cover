@@ -31,11 +31,6 @@ func runKiosk(cmd *cobra.Command) error {
 
 	l := LoggerFromContext(ctx)
 
-	zoneName := strings.TrimSpace(viper.GetString("roon.zone"))
-	if zoneName == "" {
-		return errors.New("missing zone: set --roon-zone / ROON_COVER_ROON_ZONE / config roon.zone")
-	}
-
 	downloadToTemp := viper.GetBool("download.to_temp")
 
 	client := roon.NewClient(roon.Config{DisplayName: "roon-cover"}, roon.WithLogger(l))
@@ -45,9 +40,31 @@ func runKiosk(cmd *cobra.Command) error {
 		return err
 	}
 
-	// Validate zone exists before we open the window and subscribe.
-	if err := validateZoneExists(ctx, client, core, zoneName); err != nil {
-		return err
+	zoneName := strings.TrimSpace(viper.GetString("roon.zone"))
+	if zoneName == "" {
+		// If no zone is configured, pick the first one and explain what happened.
+		zones, err := client.GetZones(ctx, core)
+		if err != nil {
+			return err
+		}
+		if len(zones) == 0 {
+			return errors.New("no zones found on this Roon Core")
+		}
+
+		available := make([]string, 0, len(zones))
+		for _, z := range zones {
+			available = append(available, z.Name)
+		}
+		zoneName = zones[0].Name
+		l.Warn("No --roon-zone configured; using the first available zone. Set --roon-zone to pick a specific zone.",
+			"chosen_zone", zoneName,
+			"available_zones", strings.Join(available, ", "),
+		)
+	} else {
+		// Validate zone exists before we open the window and subscribe.
+		if err := validateZoneExists(ctx, client, core, zoneName); err != nil {
+			return err
+		}
 	}
 
 	updates := make(chan display.Update, 2)
