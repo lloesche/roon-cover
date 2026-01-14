@@ -33,6 +33,7 @@ type SDLDisplay struct {
 	ShowTitle  bool
 	ShowArtist bool
 	ShowAlbum  bool
+	ShowZone   bool
 
 	FontPath   string
 	FontSize   int
@@ -51,6 +52,9 @@ func (d *SDLDisplay) Run(ctx context.Context, updates <-chan Update) error {
 		return errors.New("display: font-fade-ms must be >= 0")
 	}
 	fontFadeDur := time.Duration(fontFadeMS) * time.Millisecond
+
+	// How long the transient zone-name overlay stays visible before fading out.
+	const zoneOverlayVisibleFor = 3 * time.Second
 
 	easeName := strings.TrimSpace(d.Ease)
 	if easeName == "" {
@@ -87,7 +91,7 @@ func (d *SDLDisplay) Run(ctx context.Context, updates <-chan Update) error {
 	fontPath, err := resolveFontPath(d.FontPath)
 	if err != nil {
 		// Only require a font if overlay is enabled.
-		if d.ShowTitle || d.ShowArtist || d.ShowAlbum {
+		if d.ShowTitle || d.ShowArtist || d.ShowAlbum || d.ShowZone {
 			return err
 		}
 		fontPath = ""
@@ -98,7 +102,7 @@ func (d *SDLDisplay) Run(ctx context.Context, updates <-chan Update) error {
 	}
 
 	var fonts []*ttf.Font
-	if d.ShowTitle || d.ShowArtist || d.ShowAlbum {
+	if d.ShowTitle || d.ShowArtist || d.ShowAlbum || d.ShowZone {
 		// Build a small font stack: primary first, then fallbacks.
 		// This allows rendering Unicode like U+2010 (‐) without normalizing text.
 		candidatePaths := make([]string, 0, 8)
@@ -264,6 +268,9 @@ func (d *SDLDisplay) Run(ctx context.Context, updates <-chan Update) error {
 
 		phase     textPhase
 		fadeStart time.Time
+
+		// For transient overlays like the zone name: if non-zero, start fading out after this time.
+		hideAt time.Time
 	}
 
 	clearLine := func(l *textLine) {
@@ -279,15 +286,18 @@ func (d *SDLDisplay) Run(ctx context.Context, updates <-chan Update) error {
 		l.pendingStr = ""
 		l.currW, l.currH, l.pendingW, l.pendingH = 0, 0, 0, 0
 		l.phase = 0
+		l.hideAt = time.Time{}
 	}
 
 	titleLine := textLine{key: "title"}
 	artistLine := textLine{key: "artist"}
 	albumLine := textLine{key: "album"}
+	zoneLine := textLine{key: "zone"}
 	defer func() {
 		clearLine(&titleLine)
 		clearLine(&artistLine)
 		clearLine(&albumLine)
+		clearLine(&zoneLine)
 	}()
 
 	render := func() error {
@@ -358,6 +368,19 @@ func (d *SDLDisplay) Run(ctx context.Context, updates <-chan Update) error {
 			_ = tex.SetAlphaMod(mainAlpha)
 			dst := sdl.Rect{X: x, Y: y, W: tw, H: th}
 			return ren.Copy(tex, nil, &dst)
+		}
+
+		// Zone overlay (top-left, transient).
+		if d.ShowZone && zoneLine.currTex != nil && strings.TrimSpace(zoneLine.currStr) != "" {
+			alpha := 1.0
+			if zoneLine.phase != 0 && fontFadeDur > 0 {
+				t := float64(time.Since(zoneLine.fadeStart)) / float64(fontFadeDur)
+				alpha = textIntensity(zoneLine.phase, t, ease)
+			}
+			pad := int32(24)
+			if err := drawLine(zoneLine.currTex, zoneLine.currW, zoneLine.currH, pad, pad, alpha); err != nil {
+				return err
+			}
 		}
 
 		// Draw per-line overlays. Only lines that actually changed are faded.
@@ -488,7 +511,7 @@ func (d *SDLDisplay) Run(ctx context.Context, updates <-chan Update) error {
 			}
 
 			// Update per-line text overlays (if enabled).
-			if len(fonts) > 0 && (d.ShowTitle || d.ShowArtist || d.ShowAlbum) {
+			if len(fonts) > 0 && (d.ShowTitle || d.ShowArtist || d.ShowAlbum || d.ShowZone) {
 				var title, artist, album string
 				if u.NowPlaying != nil {
 					title = strings.TrimSpace(u.NowPlaying.Title)
@@ -533,6 +556,9 @@ func (d *SDLDisplay) Run(ctx context.Context, updates <-chan Update) error {
 						ln.currStr = next
 						ln.pendingStr = ""
 						ln.phase = 0
+						if ln.key == "zone" {
+							ln.hideAt = time.Now().Add(zoneOverlayVisibleFor)
+						}
 						textUpdatedThisUpdate = true
 						return nil
 					}
@@ -547,8 +573,20 @@ func (d *SDLDisplay) Run(ctx context.Context, updates <-chan Update) error {
 
 					ln.phase = textPhaseFadeOut
 					ln.fadeStart = time.Now()
+					if ln.key == "zone" {
+						// Restart the visibility window on zone changes.
+						ln.hideAt = time.Now().Add(zoneOverlayVisibleFor)
+					}
 					textUpdatedThisUpdate = true
 					return nil
+				}
+
+				if d.ShowZone {
+					if err := updateLine(&zoneLine, strings.TrimSpace(u.Zone)); err != nil {
+						return err
+					}
+				} else {
+					clearLine(&zoneLine)
 				}
 
 				if d.ShowTitle {
@@ -605,6 +643,21 @@ func (d *SDLDisplay) Run(ctx context.Context, updates <-chan Update) error {
 				}
 			}
 
+			// Auto-hide zone overlay after a short delay.
+			zoneNeedsHide := false
+			if d.ShowZone && zoneLine.currTex != nil && strings.TrimSpace(zoneLine.currStr) != "" && zoneLine.phase == 0 && !zoneLine.hideAt.IsZero() && time.Now().After(zoneLine.hideAt) && fontFadeDur > 0 {
+				// Fade out to "empty" (no fade-in).
+				if zoneLine.pendingTex != nil {
+					zoneLine.pendingTex.Destroy()
+					zoneLine.pendingTex = nil
+				}
+				zoneLine.pendingStr = ""
+				zoneLine.pendingW, zoneLine.pendingH = 0, 0
+				zoneLine.phase = textPhaseFadeOut
+				zoneLine.fadeStart = time.Now()
+				zoneNeedsHide = true
+			}
+
 			progressLine := func(ln *textLine) bool {
 				if ln.phase == 0 || fontFadeDur <= 0 {
 					return false
@@ -616,7 +669,11 @@ func (d *SDLDisplay) Run(ctx context.Context, updates <-chan Update) error {
 
 				next, swap := advanceTextPhase(ln.phase, t)
 				if swap {
-					// Fade-out complete: swap in pending, then fade-in.
+					// Fade-out complete: either swap in pending and fade-in, or clear if pending is empty.
+					if ln.pendingTex == nil && strings.TrimSpace(ln.pendingStr) == "" {
+						clearLine(ln)
+						return true
+					}
 					if ln.currTex != nil {
 						ln.currTex.Destroy()
 						ln.currTex = nil
@@ -629,6 +686,9 @@ func (d *SDLDisplay) Run(ctx context.Context, updates <-chan Update) error {
 
 					ln.phase = next
 					ln.fadeStart = time.Now()
+					if ln.key == "zone" {
+						ln.hideAt = time.Now().Add(zoneOverlayVisibleFor)
+					}
 					return true
 				}
 				// Fade-in complete (or unexpected phase): settle.
@@ -637,9 +697,11 @@ func (d *SDLDisplay) Run(ctx context.Context, updates <-chan Update) error {
 			}
 
 			needRender := false
+			needRender = progressLine(&zoneLine) || needRender
 			needRender = progressLine(&titleLine) || needRender
 			needRender = progressLine(&artistLine) || needRender
 			needRender = progressLine(&albumLine) || needRender
+			needRender = zoneNeedsHide || needRender
 
 			if needRender {
 				if err := render(); err != nil {

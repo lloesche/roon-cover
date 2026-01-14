@@ -108,6 +108,7 @@ func runKiosk(cmd *cobra.Command) error {
 	disp.ShowTitle = showAll || viper.GetBool("display.show_title")
 	disp.ShowArtist = showAll || viper.GetBool("display.show_artist")
 	disp.ShowAlbum = showAll || viper.GetBool("display.show_album")
+	disp.ShowZone = showAll || viper.GetBool("display.show_zone")
 
 	if disp.FadeMS < 0 {
 		return fmt.Errorf("--fade-ms must be >= 0 (got %d)", disp.FadeMS)

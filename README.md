@@ -82,6 +82,12 @@ roon-cover --roon-zone "Living Room" --fade-ms 500 --ease in-out-sine
 roon-cover --roon-zone "Living Room" --show-all
 ```
 
+You can also show the zone name briefly when switching zones:
+
+```bash
+roon-cover --show-zone
+```
+
 ### Customize font + faster text transitions
 
 ```bash
@@ -105,7 +111,7 @@ Run `roon-cover --help` for the full list. The most useful ones:
   - `--ease`: easing function name (e.g. `in-sine`, `out-quad`, `in-out-sine`, `out-elastic`, `out-bounce`)
   - `--font-fade-ms`: text transition duration (0 disables; independent from cover fade)
 - **Text overlay**
-  - `--show-title`, `--show-artist`, `--show-album`, `--show-all`
+  - `--show-title`, `--show-artist`, `--show-album`, `--show-zone`, `--show-all`
   - `--font`, `--font-size`
 
 ---

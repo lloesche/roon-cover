@@ -21,6 +21,7 @@ type SDLDisplay struct {
 	ShowTitle  bool
 	ShowArtist bool
 	ShowAlbum  bool
+	ShowZone   bool
 
 	FontPath   string
 	FontSize   int

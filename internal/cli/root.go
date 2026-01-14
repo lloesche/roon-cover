@@ -33,6 +33,7 @@ type rootFlags struct {
 	ShowTitle  bool
 	ShowArtist bool
 	ShowAlbum  bool
+	ShowZone   bool
 	ShowAll    bool
 
 	FontPath   string
@@ -86,7 +87,8 @@ func newRootCmd(ctx context.Context) *cobra.Command {
 	cmd.PersistentFlags().BoolVar(&flags.ShowTitle, "show-title", false, "show track title overlay")
 	cmd.PersistentFlags().BoolVar(&flags.ShowArtist, "show-artist", false, "show artist overlay")
 	cmd.PersistentFlags().BoolVar(&flags.ShowAlbum, "show-album", false, "show album overlay")
-	cmd.PersistentFlags().BoolVar(&flags.ShowAll, "show-all", false, "show title+artist+album overlay")
+	cmd.PersistentFlags().BoolVar(&flags.ShowZone, "show-zone", false, "show zone name overlay (top-left; auto-hides after 5s)")
+	cmd.PersistentFlags().BoolVar(&flags.ShowAll, "show-all", false, "show title+artist+album+zone overlays")
 
 	cmd.PersistentFlags().StringVar(&flags.FontPath, "font", "", "path to a .ttf font file (optional; default is OS-specific)")
 	cmd.PersistentFlags().IntVar(&flags.FontSize, "font-size", 28, "font size in points for overlays")
@@ -105,6 +107,7 @@ func newRootCmd(ctx context.Context) *cobra.Command {
 	_ = viper.BindPFlag("display.show_title", cmd.PersistentFlags().Lookup("show-title"))
 	_ = viper.BindPFlag("display.show_artist", cmd.PersistentFlags().Lookup("show-artist"))
 	_ = viper.BindPFlag("display.show_album", cmd.PersistentFlags().Lookup("show-album"))
+	_ = viper.BindPFlag("display.show_zone", cmd.PersistentFlags().Lookup("show-zone"))
 	_ = viper.BindPFlag("display.show_all", cmd.PersistentFlags().Lookup("show-all"))
 	_ = viper.BindPFlag("display.font", cmd.PersistentFlags().Lookup("font"))
 	_ = viper.BindPFlag("display.font_size", cmd.PersistentFlags().Lookup("font-size"))
@@ -137,6 +140,7 @@ func initConfig(configPath string) error {
 	viper.SetDefault("display.show_title", false)
 	viper.SetDefault("display.show_artist", false)
 	viper.SetDefault("display.show_album", false)
+	viper.SetDefault("display.show_zone", false)
 	viper.SetDefault("display.show_all", false)
 	viper.SetDefault("display.font", "")
 	viper.SetDefault("display.font_size", 28)
