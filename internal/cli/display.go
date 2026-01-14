@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"roon-cover/internal/display"
+	"roon-cover/internal/displaypower"
 	"roon-cover/internal/roon"
 
 	"github.com/spf13/cobra"
@@ -109,6 +110,15 @@ func runKiosk(cmd *cobra.Command) error {
 	disp.ShowArtist = showAll || viper.GetBool("display.show_artist")
 	disp.ShowAlbum = showAll || viper.GetBool("display.show_album")
 	disp.ShowZone = showAll || viper.GetBool("display.show_zone")
+
+	sleepIdleSec := viper.GetInt("display.sleep_idle_sec")
+	if sleepIdleSec < 0 {
+		return fmt.Errorf("--display-sleep-idle-sec must be >= 0 (got %d)", sleepIdleSec)
+	}
+	powerCtl := displaypower.CommandController{
+		SleepCmd: viper.GetString("display.sleep_cmd"),
+		WakeCmd:  viper.GetString("display.wake_cmd"),
+	}
 
 	if disp.FadeMS < 0 {
 		return fmt.Errorf("--fade-ms must be >= 0 (got %d)", disp.FadeMS)
@@ -243,47 +253,44 @@ func runKiosk(cmd *cobra.Command) error {
 			return order[idx].ID, order[idx].Name, true
 		}
 
+		isPlaying := func(z roon.Zone) bool {
+			return z.State == roon.ZoneStatePlaying && z.NowPlaying != nil && z.NowPlaying.ImageKey != ""
+		}
+
+		sendBlank := func(z roon.Zone, noFade bool) {
+			// Clear cover + clear track metadata. Keep the zone string so the transient zone overlay can show feedback.
+			sendLatest(updates, display.Update{
+				Zone:       z.Name,
+				State:      z.State,
+				NowPlaying: nil,
+				ClearCover: true,
+				NoFade:     noFade,
+			})
+		}
+
 		fetchAndSend := func(z roon.Zone, noFade bool) {
 			// Always log zone status transitions in kiosk mode (for the active zone).
 			zlog.Observe(l, z)
 
-			np := z.NowPlaying
-			if np == nil {
-				sendLatest(updates, display.Update{
-					Zone:       z.Name,
-					State:      z.State,
-					NowPlaying: nil,
-				})
+			if !isPlaying(z) {
+				sendBlank(z, noFade)
 				return
 			}
 
+			np := z.NowPlaying
 			key := np.ImageKey
 			s := getState(z.ID)
 			s.lastState = z.State
 			s.lastKey = key
 			s.lastTitle, s.lastArtist, s.lastAlbum = np.Title, np.Artist, np.Album
 
-			// If we have an image key, we can fetch/display the cover even when paused/loading.
-			if key == "" {
-				sendLatest(updates, display.Update{
-					Zone:       z.Name,
-					State:      z.State,
-					NowPlaying: np,
-				})
-				return
-			}
-
 			wantSize := square.Get()
 			l.Debug("display: fetching cover (zone switch)", "zone", z.Name, "state", z.State, "image_key", key, "size", wantSize)
 			img, mime, err := client.FetchImage(ctx, core, key, roon.ImageFetchOptions{Size: wantSize})
 			if err != nil {
 				l.Warn("fetch image failed", "err", err, "image_key", key)
-				// Still push metadata so overlays update.
-				sendLatest(updates, display.Update{
-					Zone:       z.Name,
-					State:      z.State,
-					NowPlaying: np,
-				})
+				// Fall back to blank rather than leaving stale art.
+				sendBlank(z, noFade)
 				return
 			}
 
@@ -308,6 +315,12 @@ func runKiosk(cmd *cobra.Command) error {
 			fetchAndSend(z, true)
 		}
 
+		var asleep bool
+		var idleSince time.Time
+		sleepAfter := time.Duration(sleepIdleSec) * time.Second
+		idleTick := time.NewTicker(1 * time.Second)
+		defer idleTick.Stop()
+
 		for {
 			select {
 			case <-ctx.Done():
@@ -323,6 +336,16 @@ func runKiosk(cmd *cobra.Command) error {
 				}
 				square.UpdateFromOutput(l, info.RenderWidth, info.RenderHeight)
 
+			case <-idleTick.C:
+				// Sleep is driven by elapsed idle time, not by receiving zone updates.
+				if sleepIdleSec > 0 && !asleep && !idleSince.IsZero() && time.Since(idleSince) >= sleepAfter {
+					if err := powerCtl.Sleep(ctx); err != nil {
+						l.Warn("display sleep command failed", "err", err)
+					} else {
+						asleep = true
+					}
+				}
+
 			case ev := <-eventCh:
 				nextID, nextName, ok := chooseNeighbor(ev.Kind)
 				if !ok || nextID == "" {
@@ -334,6 +357,22 @@ func runKiosk(cmd *cobra.Command) error {
 				mu.Unlock()
 
 				l.Info("switching active zone", "zone", nextName)
+
+				// If switching to a playing zone, wake immediately.
+				if sleepIdleSec > 0 && asleep && isPlaying(z) {
+					if err := powerCtl.Wake(ctx); err != nil {
+						l.Warn("display wake command failed", "err", err)
+					} else {
+						asleep = false
+					}
+				}
+				if !isPlaying(z) {
+					if idleSince.IsZero() {
+						idleSince = time.Now()
+					}
+				} else {
+					idleSince = time.Time{}
+				}
 				fetchAndSend(z, false)
 
 			case zs := <-zoneUpdatesCh:
@@ -354,33 +393,42 @@ func runKiosk(cmd *cobra.Command) error {
 
 				// Only drive rendering off the active zone.
 				if z.ID != "" {
-					np := z.NowPlaying
-					key := roon.ImageKey("")
-					if np != nil {
-						key = np.ImageKey
-					}
-
 					s := getState(z.ID)
 					prevState := s.lastState
 					prevKey := s.lastKey
 
-					// Update local state after capturing previous values.
-					s.lastState = z.State
-					s.lastKey = key
-
 					// Always log zone status transitions in kiosk mode.
 					zlog.Observe(l, z)
 
-					// If we don't have a now-playing (or image key), just forward metadata.
-					if key == "" || np == nil {
-						// Still forward metadata so overlays can clear/update on state changes.
-						sendLatest(updates, display.Update{
-							Zone:       z.Name,
-							State:      z.State,
-							NowPlaying: np,
-						})
+					// Sleep/wake + blanking is based on whether the active zone is actually playing.
+					if !isPlaying(z) {
+						// Transition to idle: start idle timer and blank immediately.
+						if idleSince.IsZero() {
+							idleSince = time.Now()
+						}
+						sendBlank(z, false)
+						// Update per-zone tracking so resuming behaves correctly.
+						s.lastState = z.State
+						s.lastKey = ""
 						continue
 					}
+
+					// Playing: reset idle timer and wake if needed.
+					idleSince = time.Time{}
+					if sleepIdleSec > 0 && asleep {
+						if err := powerCtl.Wake(ctx); err != nil {
+							l.Warn("display wake command failed", "err", err)
+						} else {
+							asleep = false
+						}
+					}
+
+					np := z.NowPlaying
+					key := np.ImageKey
+
+					// Update local state after capturing previous values.
+					s.lastState = z.State
+					s.lastKey = key
 
 					justStartedPlaying := prevState != roon.ZoneStatePlaying && z.State == roon.ZoneStatePlaying
 					keyChanged := key != prevKey
@@ -415,6 +463,8 @@ func runKiosk(cmd *cobra.Command) error {
 					img, mime, err := client.FetchImage(ctx, core, key, roon.ImageFetchOptions{Size: wantSize})
 					if err != nil {
 						l.Warn("fetch image failed", "err", err, "image_key", key)
+						// Don't keep stale art if fetch failed.
+						sendBlank(z, false)
 						continue
 					}
 

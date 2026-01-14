@@ -289,6 +289,24 @@ func (d *SDLDisplay) Run(ctx context.Context, updates <-chan Update) error {
 		l.hideAt = time.Time{}
 	}
 
+	// hideZoneLine hides the zone overlay visually but keeps the last zone string so we don't
+	// re-show the zone name on every subsequent idle update.
+	hideZoneLine := func(l *textLine) {
+		if l.currTex != nil {
+			l.currTex.Destroy()
+			l.currTex = nil
+		}
+		if l.pendingTex != nil {
+			l.pendingTex.Destroy()
+			l.pendingTex = nil
+		}
+		// Keep currStr as-is (so updateLine(next == currStr) does not recreate the texture).
+		l.pendingStr = ""
+		l.currW, l.currH, l.pendingW, l.pendingH = 0, 0, 0, 0
+		l.phase = 0
+		l.hideAt = time.Time{}
+	}
+
 	titleLine := textLine{key: "title"}
 	artistLine := textLine{key: "artist"}
 	albumLine := textLine{key: "album"}
@@ -447,6 +465,20 @@ func (d *SDLDisplay) Run(ctx context.Context, updates <-chan Update) error {
 
 			coverUpdatedThisUpdate := false
 			textUpdatedThisUpdate := false
+
+			if u.ClearCover {
+				// Clear both textures and stop any in-flight cover fade.
+				if prevTex != nil {
+					prevTex.Destroy()
+					prevTex = nil
+				}
+				if currTex != nil {
+					currTex.Destroy()
+					currTex = nil
+				}
+				coverFading = false
+				coverUpdatedThisUpdate = true
+			}
 
 			if len(u.CoverImage) > 0 {
 				img, _, err := image.Decode(bytes.NewReader(u.CoverImage))
@@ -671,7 +703,11 @@ func (d *SDLDisplay) Run(ctx context.Context, updates <-chan Update) error {
 				if swap {
 					// Fade-out complete: either swap in pending and fade-in, or clear if pending is empty.
 					if ln.pendingTex == nil && strings.TrimSpace(ln.pendingStr) == "" {
-						clearLine(ln)
+						if ln.key == "zone" {
+							hideZoneLine(ln)
+						} else {
+							clearLine(ln)
+						}
 						return true
 					}
 					if ln.currTex != nil {

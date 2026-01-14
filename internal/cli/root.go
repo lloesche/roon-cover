@@ -23,12 +23,15 @@ type rootFlags struct {
 	CoreName string
 	ZoneName string
 
-	PprofAddr      string
-	DownloadToTemp bool
-	Window         bool
-	DisplayIndex   int
-	FadeMS         int
-	Ease           string
+	PprofAddr           string
+	DownloadToTemp      bool
+	Window              bool
+	DisplayIndex        int
+	FadeMS              int
+	Ease                string
+	DisplaySleepCmd     string
+	DisplayWakeCmd      string
+	DisplaySleepIdleSec int
 
 	ShowTitle  bool
 	ShowArtist bool
@@ -83,6 +86,9 @@ func newRootCmd(ctx context.Context) *cobra.Command {
 	cmd.PersistentFlags().IntVar(&flags.DisplayIndex, "display", 0, "SDL display index to show on (0-based)")
 	cmd.PersistentFlags().IntVar(&flags.FadeMS, "fade-ms", 500, "crossfade duration in ms when cover changes (0 disables)")
 	cmd.PersistentFlags().StringVar(&flags.Ease, "ease", "in-out-sine", "easing function for fades (e.g. in-sine, out-sine, in-out-sine, in-quad, out-cubic, out-expo, in-circ, out-elastic, out-bounce)")
+	cmd.PersistentFlags().StringVar(&flags.DisplaySleepCmd, "display-sleep-cmd", "", "command to run when display should sleep (optional)")
+	cmd.PersistentFlags().StringVar(&flags.DisplayWakeCmd, "display-wake-cmd", "", "command to run when display should wake (optional)")
+	cmd.PersistentFlags().IntVar(&flags.DisplaySleepIdleSec, "display-sleep-idle-sec", 0, "seconds of no playback before running --display-sleep-cmd (0 disables)")
 
 	cmd.PersistentFlags().BoolVar(&flags.ShowTitle, "show-title", false, "show track title overlay")
 	cmd.PersistentFlags().BoolVar(&flags.ShowArtist, "show-artist", false, "show artist overlay")
@@ -104,6 +110,9 @@ func newRootCmd(ctx context.Context) *cobra.Command {
 	_ = viper.BindPFlag("display.index", cmd.PersistentFlags().Lookup("display"))
 	_ = viper.BindPFlag("display.fade_ms", cmd.PersistentFlags().Lookup("fade-ms"))
 	_ = viper.BindPFlag("display.ease", cmd.PersistentFlags().Lookup("ease"))
+	_ = viper.BindPFlag("display.sleep_cmd", cmd.PersistentFlags().Lookup("display-sleep-cmd"))
+	_ = viper.BindPFlag("display.wake_cmd", cmd.PersistentFlags().Lookup("display-wake-cmd"))
+	_ = viper.BindPFlag("display.sleep_idle_sec", cmd.PersistentFlags().Lookup("display-sleep-idle-sec"))
 	_ = viper.BindPFlag("display.show_title", cmd.PersistentFlags().Lookup("show-title"))
 	_ = viper.BindPFlag("display.show_artist", cmd.PersistentFlags().Lookup("show-artist"))
 	_ = viper.BindPFlag("display.show_album", cmd.PersistentFlags().Lookup("show-album"))
@@ -137,6 +146,9 @@ func initConfig(configPath string) error {
 	viper.SetDefault("display.index", 0)
 	viper.SetDefault("display.fade_ms", 500)
 	viper.SetDefault("display.ease", "in-out-sine")
+	viper.SetDefault("display.sleep_cmd", "")
+	viper.SetDefault("display.wake_cmd", "")
+	viper.SetDefault("display.sleep_idle_sec", 0)
 	viper.SetDefault("display.show_title", false)
 	viper.SetDefault("display.show_artist", false)
 	viper.SetDefault("display.show_album", false)

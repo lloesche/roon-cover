@@ -10,6 +10,10 @@ type Update struct {
 
 	NowPlaying *roon.NowPlaying
 
+	// ClearCover requests that the renderer clears any current/previous cover and shows a black screen.
+	// This is useful when the zone is not playing (idle/paused/stopped) and we want to avoid showing stale art.
+	ClearCover bool
+
 	// CoverImage contains the raw image bytes returned by Roon's image service (e.g. JPEG/PNG).
 	// If nil, the display should keep showing the last image (for now).
 	CoverImage    []byte

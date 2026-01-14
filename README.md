@@ -69,6 +69,7 @@ When the window is focused, use:
 
 - ⬅️ Left Arrow: previous zone
 - ➡️ Right Arrow: next zone
+- Q: quit
 
 ### Cover crossfade + easing
 
@@ -106,6 +107,10 @@ Run `roon-cover --help` for the full list. The most useful ones:
 - **Display**
   - `--window`: run windowed (handy for testing)
   - `--display`: choose which display to use (0-based)
+- **Power saving**
+  - `--display-sleep-idle-sec`: seconds of no playback before sleeping the display (0 disables)
+  - `--display-sleep-cmd`: command to run when sleeping (optional)
+  - `--display-wake-cmd`: command to run when waking (optional)
 - **Transitions**
   - `--fade-ms`: cover crossfade duration (0 disables)
   - `--ease`: easing function name (e.g. `in-sine`, `out-quad`, `in-out-sine`, `out-elastic`, `out-bounce`)
