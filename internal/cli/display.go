@@ -118,6 +118,7 @@ func runKiosk(cmd *cobra.Command) error {
 	powerCtl := displaypower.CommandController{
 		SleepCmd: viper.GetString("display.sleep_cmd"),
 		WakeCmd:  viper.GetString("display.wake_cmd"),
+		Timeout:  10 * time.Second,
 	}
 
 	if disp.FadeMS < 0 {
@@ -315,7 +316,76 @@ func runKiosk(cmd *cobra.Command) error {
 			fetchAndSend(z, true)
 		}
 
-		var asleep bool
+		// Power manager: non-blocking + coalescing, so we never stall the control loop on external scripts.
+		type powerManager struct {
+			mu      sync.Mutex
+			current bool // true=slept
+			desired bool // true=slept
+			running bool
+		}
+		pm := &powerManager{}
+		isSleepEnabled := func() bool {
+			return sleepIdleSec > 0 && (strings.TrimSpace(powerCtl.SleepCmd) != "" || strings.TrimSpace(powerCtl.WakeCmd) != "")
+		}
+		pmIsSlept := func() bool {
+			pm.mu.Lock()
+			defer pm.mu.Unlock()
+			return pm.current
+		}
+		pmSetDesired := func(slept bool) {
+			if !isSleepEnabled() {
+				return
+			}
+			pm.mu.Lock()
+			pm.desired = slept
+			if pm.running {
+				pm.mu.Unlock()
+				return
+			}
+			pm.running = true
+			pm.mu.Unlock()
+
+			go func() {
+				for {
+					pm.mu.Lock()
+					desired := pm.desired
+					current := pm.current
+					pm.mu.Unlock()
+
+					if desired == current {
+						pm.mu.Lock()
+						pm.running = false
+						pm.mu.Unlock()
+						return
+					}
+
+					var err error
+					if desired {
+						err = powerCtl.Sleep(ctx)
+					} else {
+						err = powerCtl.Wake(ctx)
+					}
+					if err != nil {
+						if desired {
+							l.Warn("display sleep command failed", "err", err)
+						} else {
+							l.Warn("display wake command failed", "err", err)
+						}
+						// Do not flip current on failure; keep trying only if desired changes again.
+						pm.mu.Lock()
+						pm.desired = current
+						pm.running = false
+						pm.mu.Unlock()
+						return
+					}
+
+					pm.mu.Lock()
+					pm.current = desired
+					pm.mu.Unlock()
+				}
+			}()
+		}
+
 		var idleSince time.Time
 		sleepAfter := time.Duration(sleepIdleSec) * time.Second
 		idleTick := time.NewTicker(1 * time.Second)
@@ -338,12 +408,8 @@ func runKiosk(cmd *cobra.Command) error {
 
 			case <-idleTick.C:
 				// Sleep is driven by elapsed idle time, not by receiving zone updates.
-				if sleepIdleSec > 0 && !asleep && !idleSince.IsZero() && time.Since(idleSince) >= sleepAfter {
-					if err := powerCtl.Sleep(ctx); err != nil {
-						l.Warn("display sleep command failed", "err", err)
-					} else {
-						asleep = true
-					}
+				if sleepIdleSec > 0 && !pmIsSlept() && !idleSince.IsZero() && time.Since(idleSince) >= sleepAfter {
+					pmSetDesired(true)
 				}
 
 			case ev := <-eventCh:
@@ -359,12 +425,8 @@ func runKiosk(cmd *cobra.Command) error {
 				l.Info("switching active zone", "zone", nextName)
 
 				// If switching to a playing zone, wake immediately.
-				if sleepIdleSec > 0 && asleep && isPlaying(z) {
-					if err := powerCtl.Wake(ctx); err != nil {
-						l.Warn("display wake command failed", "err", err)
-					} else {
-						asleep = false
-					}
+				if sleepIdleSec > 0 && pmIsSlept() && isPlaying(z) {
+					pmSetDesired(false)
 				}
 				if !isPlaying(z) {
 					if idleSince.IsZero() {
@@ -415,12 +477,8 @@ func runKiosk(cmd *cobra.Command) error {
 
 					// Playing: reset idle timer and wake if needed.
 					idleSince = time.Time{}
-					if sleepIdleSec > 0 && asleep {
-						if err := powerCtl.Wake(ctx); err != nil {
-							l.Warn("display wake command failed", "err", err)
-						} else {
-							asleep = false
-						}
+					if sleepIdleSec > 0 && pmIsSlept() {
+						pmSetDesired(false)
 					}
 
 					np := z.NowPlaying
