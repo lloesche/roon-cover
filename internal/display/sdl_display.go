@@ -737,11 +737,15 @@ func (d *SDLDisplay) Run(ctx context.Context, updates <-chan Update) error {
 						}
 					}
 				case *sdl.KeyboardEvent:
-					if d.EventCh == nil {
-						break
-					}
 					// Only react on key down (and ignore repeats).
 					if e.Type != sdl.KEYDOWN || e.Repeat != 0 {
+						break
+					}
+					// Convenience quit hotkey for kiosk/fullscreen mode.
+					if e.Keysym.Sym == sdl.K_q {
+						return nil
+					}
+					if d.EventCh == nil {
 						break
 					}
 					var kind EventKind
