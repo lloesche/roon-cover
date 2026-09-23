@@ -11,9 +11,24 @@ import (
 )
 
 type statusRow struct {
-	value string
-	image *ebiten.Image
-	start time.Time
+	value  string
+	image  *ebiten.Image
+	start  time.Time
+	inline bool
+}
+
+func statusInline(status *Status, index int) bool {
+	return status != nil && index > 0 && index < len(status.Joins) && status.Joins[index]
+}
+
+func statusLineCount(status *Status) int {
+	count := 0
+	for i := range statusLines(status) {
+		if !statusInline(status, i) {
+			count++
+		}
+	}
+	return count
 }
 
 func statusLines(status *Status) []string {
@@ -39,7 +54,7 @@ func (g *windowGame) setStatus(status *Status, now time.Time) {
 	}
 	lines := statusLines(status)
 	common := 0
-	for common < len(lines) && common < len(g.statusRows) && lines[common] == g.statusRows[common].value {
+	for common < len(lines) && common < len(g.statusRows) && lines[common] == g.statusRows[common].value && statusInline(status, common) == g.statusRows[common].inline {
 		common++
 	}
 	for _, row := range g.statusRows[common:] {
@@ -48,8 +63,8 @@ func (g *windowGame) setStatus(status *Status, now time.Time) {
 		}
 	}
 	g.statusRows = g.statusRows[:common]
-	for _, line := range lines[common:] {
-		g.statusRows = append(g.statusRows, statusRow{value: line, start: now})
+	for i, line := range lines[common:] {
+		g.statusRows = append(g.statusRows, statusRow{value: line, start: now, inline: statusInline(status, common+i)})
 	}
 	g.status = status
 }
@@ -68,7 +83,7 @@ func (g *windowGame) clearStatusImage() {
 // shift as new steps arrive. Scale down the instructions on smaller displays.
 func statusLayout(text *textEngine, width, height int, scale float64, count int) (x, y, lineWidth, lineHeight int, textScale float64) {
 	pad := max(1, int(math.Round(24*scale)))
-	slots := max(9, count)
+	slots := max(3, count)
 	textScale = min(scale, float64(max(1, height-2*pad))/(float64(slots)*text.size*1.7))
 	lineHeight = max(1, int(math.Ceil(text.size*textScale*1.7)))
 	lineWidth = max(1, min(width-2*pad, int(960*scale)))
@@ -88,11 +103,16 @@ func (g *windowGame) drawStatus(screen *ebiten.Image) {
 		settled = alphaAll <= 0
 	}
 	screen.Fill(color.NRGBA{R: uint8(18 * alphaAll), G: uint8(22 * alphaAll), B: uint8(30 * alphaAll), A: 255})
-	x, y, width, lineHeight, scale := statusLayout(g.text, g.width, g.height, g.scale, len(g.statusRows))
+	x, y, width, lineHeight, scale := statusLayout(g.text, g.width, g.height, g.scale, statusLineCount(g.status))
+	cursorX, cursorY := x, y
 	for i := range g.statusRows {
 		row := &g.statusRows[i]
+		if i > 0 && !row.inline {
+			cursorX = x
+			cursorY += lineHeight
+		}
 		if row.image == nil {
-			pixels, _, err := g.text.raster(row.value, width, scale)
+			pixels, _, err := g.text.raster(row.value, max(1, width-(cursorX-x)), scale)
 			if err != nil {
 				g.err = err
 				ebiten.ScheduleFrame()
@@ -108,9 +128,10 @@ func (g *windowGame) drawStatus(screen *ebiten.Image) {
 			settled = false
 		}
 		opts := &ebiten.DrawImageOptions{}
-		opts.GeoM.Translate(float64(x), float64(y+i*lineHeight))
+		opts.GeoM.Translate(float64(cursorX), float64(cursorY))
 		opts.ColorScale.ScaleAlpha(float32(alpha * alphaAll))
 		screen.DrawImage(row.image, opts)
+		cursorX += row.image.Bounds().Dx() + int(math.Round(g.text.size*scale*.2))
 	}
 	if settled {
 		select {
@@ -125,13 +146,19 @@ func renderStatus(text *textEngine, status Status, width, height int, scale floa
 	canvas := image.NewNRGBA(image.Rect(0, 0, max(1, width), max(1, height)))
 	draw.Draw(canvas, canvas.Bounds(), image.NewUniform(color.NRGBA{R: 18, G: 22, B: 30, A: 255}), image.Point{}, draw.Src)
 	lines := statusLines(&status)
-	x, y, lineWidth, lineHeight, textScale := statusLayout(text, width, height, scale, len(lines))
+	x, y, lineWidth, lineHeight, textScale := statusLayout(text, width, height, scale, statusLineCount(&status))
+	cursorX, cursorY := x, y
 	for i, value := range lines {
-		line, _, err := text.raster(value, lineWidth, textScale)
+		if i > 0 && !statusInline(&status, i) {
+			cursorX = x
+			cursorY += lineHeight
+		}
+		line, _, err := text.raster(value, max(1, lineWidth-(cursorX-x)), textScale)
 		if err != nil {
 			return nil, err
 		}
-		draw.Draw(canvas, line.Bounds().Add(image.Pt(x, y+i*lineHeight)), line, line.Bounds().Min, draw.Over)
+		draw.Draw(canvas, line.Bounds().Add(image.Pt(cursorX, cursorY)), line, line.Bounds().Min, draw.Over)
+		cursorX += line.Bounds().Dx() + int(math.Round(text.size*textScale*.2))
 	}
 	return canvas, nil
 }

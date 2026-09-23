@@ -97,7 +97,7 @@ func TestStartupPhasesAreOrderedAndNetworkRunsAhead(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		start := time.Now()
 		workDone := make(chan struct{})
-		want := []string{"Looking for Roon…", "Found blackhole", "Connecting to blackhole…", "Connected", "Choosing listening zone…", "Dialysis", ""}
+		want := []string{"Looking for Roon…", "found blackhole", "Connecting to blackhole…", "connected", "Choosing listening zone…", "Dialysis", ""}
 		at := []time.Duration{0, time.Second, 2500 * time.Millisecond, 3500 * time.Millisecond, 5 * time.Second, 6 * time.Second, 8500 * time.Millisecond}
 		index := 0
 		err := presentStartupAttempt(context.Background(), func(s display.Status) {
@@ -115,6 +115,11 @@ func TestStartupPhasesAreOrderedAndNetworkRunsAhead(t *testing.T) {
 			if len(s.Lines) != count || s.Lines[0] != want[0] {
 				t.Fatal("startup history lost")
 			}
+			for i := range s.Lines {
+				if s.Joins[i] != (i%2 == 1) {
+					t.Fatal("results must follow their prompts on the same line")
+				}
+			}
 			if s.FadeOut != (index == 6) {
 				t.Fatal("fade-out must follow the zone hold")
 			}
@@ -123,7 +128,7 @@ func TestStartupPhasesAreOrderedAndNetworkRunsAhead(t *testing.T) {
 		}, func(report func(display.Status)) error {
 			holds := []time.Duration{time.Second, 500 * time.Millisecond, time.Second, 500 * time.Millisecond, 2 * time.Second}
 			for i, title := range want[1:6] {
-				report(display.Status{Title: title, Hold: holds[i]})
+				report(display.Status{Title: title, Hold: holds[i], AppendInline: i%2 == 0})
 			}
 			close(workDone)
 			return nil

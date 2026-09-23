@@ -127,7 +127,7 @@ func TestStartupLineFadePreservesEarlierText(t *testing.T) {
 	now := time.Unix(1, 0)
 	g.setStatus(&Status{Lines: []string{"Looking for Roon…"}}, now)
 	before := brightness(now.Add(time.Second))
-	g.setStatus(&Status{Lines: []string{"Looking for Roon…", "Found blackhole"}}, now.Add(time.Second))
+	g.setStatus(&Status{Lines: []string{"Looking for Roon…", "found blackhole"}, Joins: []bool{false, true}}, now.Add(time.Second))
 	if got := brightness(now.Add(time.Second)); got != before {
 		t.Fatal("adding a line moved, faded, or replaced earlier text")
 	}
@@ -137,7 +137,7 @@ func TestStartupLineFadePreservesEarlierText(t *testing.T) {
 		t.Fatal("new text did not fade in gradually")
 	}
 	settled := make(chan struct{}, 1)
-	g.setStatus(&Status{Lines: []string{"Looking for Roon…", "Found blackhole"}, FadeOut: true, Settled: settled}, now.Add(2*time.Second))
+	g.setStatus(&Status{Lines: []string{"Looking for Roon…", "found blackhole"}, Joins: []bool{false, true}, FadeOut: true, Settled: settled}, now.Add(2*time.Second))
 	startOut := brightness(now.Add(2 * time.Second))
 	midOut := brightness(now.Add(2500 * time.Millisecond))
 	select {

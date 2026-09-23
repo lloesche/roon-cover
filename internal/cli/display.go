@@ -83,7 +83,7 @@ func runKiosk(cmd *cobra.Command) error {
 			if err != nil {
 				return err
 			}
-			status(display.Status{Title: "Connected", Hold: time.Second})
+			status(display.Status{Title: "connected", Hold: time.Second, AppendInline: true})
 			status(display.Status{Title: "Choosing listening zone…", Hold: 500 * time.Millisecond})
 			controller = &app.Controller{Source: client, Core: core, Log: l, Options: app.Options{Zone: configFor(cmd).GetString("roon.zone"), SleepAfter: time.Duration(sleepIdleSec) * time.Second}, Power: func(ctx context.Context, sleep bool) error {
 				if sleep {
@@ -98,7 +98,7 @@ func runKiosk(cmd *cobra.Command) error {
 				return err
 			}
 			zone := controller.SelectedZone()
-			status(display.Status{Title: zone.Name, Hold: 2 * time.Second})
+			status(display.Status{Title: zone.Name, Hold: 2 * time.Second, AppendInline: true})
 			return nil
 		})
 		if err == nil && ctx.Err() == nil {

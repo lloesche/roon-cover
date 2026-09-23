@@ -18,9 +18,12 @@ type Update struct {
 type Status struct {
 	Title, Detail, Hint string
 	// Lines is an immutable, cumulative startup transcript when present.
-	Lines   []string
-	Hold    time.Duration
-	FadeOut bool
+	Lines []string
+	// Joins marks fragments that continue the preceding line.
+	Joins        []bool
+	AppendInline bool
+	Hold         time.Duration
+	FadeOut      bool
 	// Settled is signaled after drawing the fully faded-in (or out) status.
 	Settled chan<- struct{}
 }

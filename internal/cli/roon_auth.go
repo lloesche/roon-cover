@@ -21,7 +21,7 @@ func ensureCoreAndPaired(ctx context.Context, cmd *cobra.Command, client *roon.C
 		return roon.Core{}, err
 	}
 	if status != nil {
-		status(display.Status{Title: "Found " + core.Name, Hold: time.Second})
+		status(display.Status{Title: "found " + core.Name, Hold: time.Second, AppendInline: true})
 		status(display.Status{Title: "Connecting to " + core.Name + "…", Hold: 500 * time.Millisecond})
 	}
 

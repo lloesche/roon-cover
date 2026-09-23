@@ -38,6 +38,8 @@ func presentStartupAttempt(ctx context.Context, show func(display.Status), attem
 	phases := make(chan display.Status, 8)
 	done := make(chan error, 1)
 	var transcript []string
+	var joins []bool
+	canJoin := false
 	go func() {
 		report := func(s display.Status) {
 			select {
@@ -59,17 +61,20 @@ func presentStartupAttempt(ctx context.Context, show func(display.Status), attem
 			if !ok {
 				err := <-done
 				if err == nil {
-					showStartupPhase(ctx, show, display.Status{Lines: transcript, FadeOut: true})
+					showStartupPhase(ctx, show, display.Status{Lines: transcript, Joins: joins, FadeOut: true})
 				}
 				return err
 			}
-			for _, line := range []string{phase.Title, phase.Detail, phase.Hint} {
+			for i, line := range []string{phase.Title, phase.Detail, phase.Hint} {
 				if line != "" {
 					transcript = append(transcript, line)
+					joins = append(joins, i == 0 && phase.AppendInline && canJoin)
 				}
 			}
 			// Complete immutable snapshots survive coalescing in the renderer.
 			phase.Lines = append([]string(nil), transcript...)
+			phase.Joins = append([]bool(nil), joins...)
+			canJoin = phase.Detail == "" && phase.Hint == ""
 			showStartupPhase(ctx, show, phase)
 		}
 	}

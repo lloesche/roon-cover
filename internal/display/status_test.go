@@ -17,9 +17,9 @@ func TestPairingStatusRaster(t *testing.T) {
 	}
 	defer engine.close()
 	pixels, err := renderStatus(engine, Status{Lines: []string{
-		"Looking for Roon…", "Found blackhole", "Connecting to blackhole…",
-		"Connected", "Choosing listening zone…", "Dialysis",
-	}}, 800, 800, 1)
+		"Looking for Roon…", "found blackhole", "Connecting to blackhole…",
+		"connected", "Choosing listening zone…", "Dialysis",
+	}, Joins: []bool{false, true, false, true, false, true}}, 800, 800, 1)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -48,9 +48,12 @@ func TestAppendingStatusDoesNotRestartEarlierLines(t *testing.T) {
 	var g windowGame
 	now := time.Unix(1, 0)
 	g.setStatus(&Status{Lines: []string{"Looking for Roon…"}}, now)
-	g.setStatus(&Status{Lines: []string{"Looking for Roon…", "Found blackhole", "Connecting…"}}, now.Add(time.Second))
+	g.setStatus(&Status{Lines: []string{"Looking for Roon…", "found blackhole", "Connecting…"}, Joins: []bool{false, true, false}}, now.Add(time.Second))
 	if len(g.statusRows) != 3 || g.statusRows[0].start != now || g.statusRows[1].start != now.Add(time.Second) {
 		t.Fatal("only appended lines should begin fading")
+	}
+	if statusLineCount(g.status) != 2 || !g.statusRows[1].inline {
+		t.Fatal("result must share the prompt's line")
 	}
 	g.clearStatusImage()
 	if g.statusRows[0].start != now {
