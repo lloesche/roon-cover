@@ -7,14 +7,13 @@ import (
 	"roon-cover/internal/roon"
 
 	"github.com/spf13/cobra"
-	"github.com/spf13/viper"
 )
 
 func ensureCoreAndPaired(cmd *cobra.Command, client *roon.Client) (roon.Core, error) {
 	ctx := cmd.Context()
 	l := LoggerFromContext(ctx)
 
-	coreName := strings.TrimSpace(viper.GetString("roon.core"))
+	coreName := strings.TrimSpace(configFor(cmd).GetString("roon.core"))
 	core, err := resolveCore(ctx, client, coreName)
 	if err != nil {
 		return roon.Core{}, err

@@ -7,7 +7,6 @@ import (
 	"roon-cover/internal/roon"
 
 	"github.com/spf13/cobra"
-	"github.com/spf13/viper"
 )
 
 func newRoonZonesCmd() *cobra.Command {
@@ -28,8 +27,8 @@ func newRoonZonesCmd() *cobra.Command {
 				return err
 			}
 
-			zoneFilter := strings.TrimSpace(viper.GetString("roon.zone"))
-			downloadToTemp := viper.GetBool("download.to_temp")
+			zoneFilter := strings.TrimSpace(configFor(cmd).GetString("roon.zone"))
+			downloadToTemp := configFor(cmd).GetBool("download.to_temp")
 			var lastKey roon.ImageKey
 			var lastDownloaded roon.ImageKey
 			var lastState roon.ZoneState

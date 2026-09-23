@@ -33,7 +33,7 @@ func Publish(ch chan Update, scene Update) {
 	}
 }
 
-// ScreenInfo describes the actual SDL render output size and chosen display.
+// ScreenInfo describes the physical render output size and chosen display.
 // This allows the producer (roon fetcher) to request a suitably-sized cover image.
 type ScreenInfo struct {
 	DisplayIndex int
@@ -48,7 +48,7 @@ const (
 	EventNextZone
 )
 
-// Event is sent from the renderer (SDL) back to the producer (CLI) for user interactions.
+// Event carries renderer input back to the application controller.
 type Event struct {
 	Kind EventKind
 }

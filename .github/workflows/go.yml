@@ -1,0 +1,46 @@
+name: Go
+on: [push, pull_request]
+permissions:
+  contents: read
+jobs:
+  desktop:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-2025, macos-15, ubuntu-24.04, ubuntu-24.04-arm]
+    runs-on: ${{ matrix.os }}
+    env:
+      CGO_ENABLED: '0'
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version: '1.25.5'
+          cache-dependency-path: go.sum
+      - name: Linux runtime libraries and test fonts
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y libx11-6 libgl1 libglx-mesa0 libxcursor1 libxi6 libxinerama1 libxrandr2 libxrender1 libxext6 xvfb fonts-noto-core fonts-noto-cjk fonts-noto-color-emoji
+      - run: go mod verify
+      - run: go test ./...
+        if: runner.os != 'Linux'
+      - run: xvfb-run -a go test ./...
+        if: runner.os == 'Linux'
+      - run: go vet ./...
+      - run: go build -o build/ ./cmd/roon-cover
+      - name: Linux GPU pipeline checks (Mesa)
+        if: runner.os == 'Linux'
+        env:
+          ROON_COVER_GPU_TESTS: '1'
+          LIBGL_ALWAYS_SOFTWARE: '1'
+        run: xvfb-run -a go test ./internal/display -count=1
+      - name: Race checks
+        if: runner.os == 'Linux'
+        env:
+          CGO_ENABLED: '1'
+        run: go test -race ./internal/app ./internal/roon ./internal/displaypower
+      - name: First window frame without input
+        if: runner.os == 'Linux'
+        env:
+          ROON_COVER_STARTUP_SMOKE: '1'
+          LIBGL_ALWAYS_SOFTWARE: '1'
+        run: xvfb-run -a go test ./internal/display -count=1

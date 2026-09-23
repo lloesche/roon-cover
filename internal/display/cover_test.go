@@ -1,10 +1,12 @@
 package display
 
 import (
+	"context"
 	"github.com/hajimehoshi/ebiten/v2"
 	"image"
 	"image/color"
 	"os"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -12,6 +14,9 @@ import (
 // GPU checks run inside the real engine lifecycle and use actual GPU readback.
 // Opt in on a machine with a graphics driver (or an Xvfb/Mesa CI session).
 func TestMain(m *testing.M) {
+	if os.Getenv("ROON_COVER_STARTUP_SMOKE") == "1" {
+		os.Exit(windowStartupSmoke())
+	}
 	if os.Getenv("ROON_COVER_GPU_TESTS") != "1" {
 		os.Exit(m.Run())
 	}
@@ -21,6 +26,27 @@ func TestMain(m *testing.M) {
 		panic(err)
 	}
 	os.Exit(g.code)
+}
+
+func windowStartupSmoke() int {
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	info := make(chan ScreenInfo, 1)
+	updates := make(chan Update, 1)
+	var initialized atomic.Bool
+	go func() {
+		select {
+		case size := <-info:
+			initialized.Store(size.RenderWidth > 0 && size.RenderHeight > 0)
+			cancel()
+		case <-ctx.Done():
+		}
+	}()
+	w := Window{Width: 64, Height: 64, Title: "roon-cover startup check", InfoCh: info}
+	if err := w.Run(ctx, updates); err != nil || !initialized.Load() {
+		return 1
+	}
+	return 0
 }
 
 type testGame struct {

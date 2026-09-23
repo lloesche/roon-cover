@@ -33,18 +33,19 @@ type textLine struct {
 	rendered  string
 }
 type windowGame struct {
-	config        *Window
-	ctx           context.Context
-	scenes        <-chan Update
-	cover         coverLayer
-	text          *textEngine
-	lines         [4]textLine
-	enabled       [4]bool
-	width, height int
-	scale         float64
-	now           time.Time
-	timer         *time.Timer
-	err           error
+	config                 *Window
+	ctx                    context.Context
+	scenes                 <-chan Update
+	cover                  coverLayer
+	text                   *textEngine
+	lines                  [4]textLine
+	enabled                [4]bool
+	width, height          int
+	scale                  float64
+	now                    time.Time
+	timer                  *time.Timer
+	err                    error
+	presented, minimumMode bool
 }
 
 func (d *Window) Run(ctx context.Context, updates <-chan Update) error {
@@ -72,7 +73,9 @@ func (d *Window) Run(ctx context.Context, updates <-chan Update) error {
 	}
 	ebiten.SetRunnableOnUnfocused(true)
 	// Sleep between external updates and animation/overlay deadlines.
-	ebiten.SetFPSMode(ebiten.FPSModeVsyncOffMinimum)
+	// Bootstrap a frame before entering event-driven mode: the application
+	// needs Layout's size before it can publish its first artwork request.
+	ebiten.SetFPSMode(ebiten.FPSModeVsyncOn)
 	localCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	scenes := make(chan Update, 1)
@@ -126,6 +129,10 @@ func (g *windowGame) close() {
 	}
 }
 func (g *windowGame) Update() error {
+	if g.presented && !g.minimumMode {
+		ebiten.SetFPSMode(ebiten.FPSModeVsyncOffMinimum)
+		g.minimumMode = true
+	}
 	if g.err != nil {
 		return g.err
 	}
@@ -214,6 +221,7 @@ func (g *windowGame) Layout(w, h int) (int, int) {
 	return width, height
 }
 func (g *windowGame) Draw(screen *ebiten.Image) {
+	defer func() { g.presented = true }()
 	screen.Fill(color.Black)
 	g.cover.draw(screen, g.now)
 	if g.text == nil {

@@ -4,7 +4,7 @@ import (
 	"context"
 	"fmt"
 	"github.com/spf13/cobra"
-	"github.com/spf13/viper"
+
 	"roon-cover/internal/app"
 	"roon-cover/internal/display"
 	"roon-cover/internal/displaypower"
@@ -26,7 +26,7 @@ func runKiosk(cmd *cobra.Command) error {
 		Title: "roon-cover",
 	}
 
-	windowed := viper.GetBool("display.window")
+	windowed := configFor(cmd).GetBool("display.window")
 	if windowed {
 		disp.Width = 800
 		disp.Height = 800
@@ -34,28 +34,28 @@ func runKiosk(cmd *cobra.Command) error {
 	} else {
 		disp.Fullscreen = true
 	}
-	disp.DisplayIndex = viper.GetInt("display.index")
+	disp.DisplayIndex = configFor(cmd).GetInt("display.index")
 	disp.InfoCh = infoCh
 	disp.EventCh = eventCh
-	disp.FadeMS = viper.GetInt("display.fade_ms")
-	disp.Ease = viper.GetString("display.ease")
-	disp.FontPath = viper.GetString("display.font")
-	disp.FontSize = viper.GetInt("display.font_size")
-	disp.FontFadeMS = viper.GetInt("display.font_fade_ms")
+	disp.FadeMS = configFor(cmd).GetInt("display.fade_ms")
+	disp.Ease = configFor(cmd).GetString("display.ease")
+	disp.FontPath = configFor(cmd).GetString("display.font")
+	disp.FontSize = configFor(cmd).GetInt("display.font_size")
+	disp.FontFadeMS = configFor(cmd).GetInt("display.font_fade_ms")
 
-	showAll := viper.GetBool("display.show_all")
-	disp.ShowTitle = showAll || viper.GetBool("display.show_title")
-	disp.ShowArtist = showAll || viper.GetBool("display.show_artist")
-	disp.ShowAlbum = showAll || viper.GetBool("display.show_album")
-	disp.ShowZone = showAll || viper.GetBool("display.show_zone")
+	showAll := configFor(cmd).GetBool("display.show_all")
+	disp.ShowTitle = showAll || configFor(cmd).GetBool("display.show_title")
+	disp.ShowArtist = showAll || configFor(cmd).GetBool("display.show_artist")
+	disp.ShowAlbum = showAll || configFor(cmd).GetBool("display.show_album")
+	disp.ShowZone = showAll || configFor(cmd).GetBool("display.show_zone")
 
-	sleepIdleSec := viper.GetInt("display.sleep_idle_sec")
+	sleepIdleSec := configFor(cmd).GetInt("display.sleep_idle_sec")
 	if sleepIdleSec < 0 {
 		return fmt.Errorf("--display-sleep-idle-sec must be >= 0 (got %d)", sleepIdleSec)
 	}
 	powerCtl := displaypower.CommandController{
-		SleepCmd: viper.GetString("display.sleep_cmd"),
-		WakeCmd:  viper.GetString("display.wake_cmd"),
+		SleepCmd: configFor(cmd).GetString("display.sleep_cmd"),
+		WakeCmd:  configFor(cmd).GetString("display.wake_cmd"),
 		Timeout:  10 * time.Second,
 	}
 
@@ -82,13 +82,13 @@ func runKiosk(cmd *cobra.Command) error {
 	if err != nil {
 		return err
 	}
-	controller := app.Controller{Source: client, Core: core, Log: l, Options: app.Options{Zone: viper.GetString("roon.zone"), SleepAfter: time.Duration(sleepIdleSec) * time.Second}, Power: func(ctx context.Context, sleep bool) error {
+	controller := app.Controller{Source: client, Core: core, Log: l, Options: app.Options{Zone: configFor(cmd).GetString("roon.zone"), SleepAfter: time.Duration(sleepIdleSec) * time.Second}, Power: func(ctx context.Context, sleep bool) error {
 		if sleep {
 			return powerCtl.Sleep(ctx)
 		}
 		return powerCtl.Wake(ctx)
 	}}
-	if viper.GetBool("download.to_temp") {
+	if configFor(cmd).GetBool("download.to_temp") {
 		controller.Options.SaveArtwork = func(zone string, data []byte, mime string) { writeCoverBytesToTemp(l, zone, data, mime) }
 	}
 	if err := controller.Initialize(zones); err != nil {
@@ -98,8 +98,9 @@ func runKiosk(cmd *cobra.Command) error {
 	go func() { done <- controller.Run(ctx, updates, infoCh, eventCh) }()
 	renderErr := disp.Run(ctx, updates)
 	cancel()
+	controllerErr := <-done
 	if renderErr != nil {
 		return renderErr
 	}
-	return <-done
+	return controllerErr
 }
