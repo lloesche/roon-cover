@@ -151,8 +151,12 @@ func (g *windowGame) Update() error {
 		values := [4]string{"", "", "", scene.Zone}
 		if scene.NowPlaying != nil {
 			values[0] = scene.NowPlaying.Title
-			values[1] = scene.NowPlaying.Artist
-			values[2] = scene.NowPlaying.Album
+			if artist := strings.TrimSpace(scene.NowPlaying.Artist); artist != "" {
+				values[1] = "Performed by " + artist
+			}
+			if album := strings.TrimSpace(scene.NowPlaying.Album); album != "" {
+				values[2] = "On " + album
+			}
 		}
 		for i, value := range values {
 			if !g.enabled[i] {
@@ -256,14 +260,8 @@ func (g *windowGame) Draw(screen *ebiten.Image) {
 		return
 	}
 	pad := math.Round(24 * g.scale)
-	lineHeight := math.Ceil(g.text.size * g.scale * 1.5)
-	count := 0
-	for i := 0; i < 3; i++ {
-		if g.lines[i].animation.value != "" {
-			count++
-		}
-	}
-	y := float64(g.height) - pad - float64(count)*lineHeight
+	// Rasterize first so positioning uses the actual shaped text heights,
+	// including fallback fonts with taller glyphs.
 	for i := range g.lines {
 		line := &g.lines[i]
 		if line.animation.value != line.rendered {
@@ -272,7 +270,11 @@ func (g *windowGame) Draw(screen *ebiten.Image) {
 				line.image = nil
 			}
 			if line.animation.value != "" {
-				pixels, missing, err := g.text.raster(line.animation.value, max(1, g.width-int(2*pad)), g.scale)
+				scale := g.scale
+				if i == 0 {
+					scale *= 1.5
+				}
+				pixels, missing, err := g.text.raster(line.animation.value, max(1, g.width-int(2*pad)), scale)
 				if err != nil {
 					g.err = err
 					ebiten.ScheduleFrame()
@@ -285,6 +287,28 @@ func (g *windowGame) Draw(screen *ebiten.Image) {
 			}
 			line.rendered = line.animation.value
 		}
+	}
+	// Title, album, artist; the temporary zone label stays at the top left.
+	order := [...]int{0, 2, 1}
+	gap := math.Round(g.text.size * g.scale * .1)
+	titleGap := math.Round(g.text.size * g.scale * .5)
+	height := 0.0
+	visible := 0
+	for _, i := range order {
+		if line := &g.lines[i]; line.image != nil {
+			if visible > 0 {
+				height += gap
+				if g.lines[0].image != nil && visible == 1 {
+					height += titleGap
+				}
+			}
+			height += float64(line.image.Bounds().Dy())
+			visible++
+		}
+	}
+	y := float64(g.height) - pad - height
+	for _, i := range [...]int{0, 2, 1, 3} {
+		line := &g.lines[i]
 		if line.image == nil {
 			continue
 		}
@@ -292,7 +316,10 @@ func (g *windowGame) Draw(screen *ebiten.Image) {
 		if i == 3 {
 			ly = pad
 		} else {
-			y += lineHeight
+			y += float64(line.image.Bounds().Dy()) + gap
+			if i == 0 {
+				y += titleGap
+			}
 		}
 		alpha := float32(line.animation.opacity(g.now))
 		shadow := &ebiten.DrawImageOptions{}
