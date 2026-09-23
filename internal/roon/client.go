@@ -8,8 +8,9 @@ import (
 )
 
 type Client struct {
-	log *slog.Logger
-	cfg Config
+	store CredentialStore
+	log   *slog.Logger
+	cfg   Config
 }
 
 type Option func(*Client)
@@ -47,38 +48,23 @@ func (c *Client) Pair(ctx context.Context, core Core) (Credentials, error) {
 	}
 	defer s.conn.Close()
 
-	// If already paired (from stored creds), nothing to do.
-	if creds.PairedCoreID != "" {
-		return creds, nil
+	if current := s.credentials(); current.PairedCoreID != "" {
+		return current, nil
 	}
-
 	c.log.Info("waiting for roon pairing approval", "core", core.Name)
-
-	// Wait for the Core to call com.roonlabs.pairing:1/pair after user approval.
-	waitCtx := ctx
-	if _, ok := ctx.Deadline(); !ok {
-		var cancel context.CancelFunc
-		waitCtx, cancel = context.WithTimeout(ctx, 5*time.Minute)
-		defer cancel()
-	}
-
-	for {
-		// Fast path if the pairing request was handled before we started waiting.
-		if creds.PairedCoreID != "" {
-			c.log.Info("pairing approved", "core_id", creds.PairedCoreID)
-			return creds, nil
+	waitCtx, cancel := context.WithTimeout(ctx, 5*time.Minute)
+	defer cancel()
+	select {
+	case <-waitCtx.Done():
+		return Credentials{}, waitCtx.Err()
+	case <-s.conn.closed:
+		return Credentials{}, errors.New("roon: disconnected while waiting for pairing")
+	case <-s.pairedSignal:
+		current := s.credentials()
+		if current.PairedCoreID == "" {
+			return Credentials{}, errors.New("pairing signaled without a core")
 		}
-
-		select {
-		case <-waitCtx.Done():
-			return Credentials{}, waitCtx.Err()
-		case <-s.pairedSignal:
-			if creds.PairedCoreID == "" {
-				return Credentials{}, errors.New("pairing signaled but paired_core_id is empty")
-			}
-			c.log.Info("pairing approved", "core_id", creds.PairedCoreID)
-			return creds, nil
-		}
+		return current, nil
 	}
 }
 
@@ -94,4 +80,12 @@ type ImageFetchOptions struct {
 
 type ZoneUpdate struct {
 	Zones []Zone
+}
+
+func WithCredentialStore(store CredentialStore) Option { return func(c *Client) { c.store = store } }
+func (c *Client) credentialStore() (CredentialStore, error) {
+	if c.store != nil {
+		return c.store, nil
+	}
+	return NewFileCredentialStore("roon-cover")
 }

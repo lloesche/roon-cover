@@ -19,23 +19,27 @@ func (s *session) registerPingService() {
 type pairingState struct {
 	mu sync.Mutex
 
-	subs map[string]struct{} // subscription_key as string
+	subs map[string]string // subscription_key as string
 }
 
 func (s *session) registerPairingService() {
-	ps := &pairingState{subs: map[string]struct{}{}}
+	ps := &pairingState{subs: map[string]string{}}
 
 	s.conn.RegisterHandler(svcPairing, func(req *mooRequest) error {
+		s.mu.Lock()
+		defer s.mu.Unlock()
 		switch req.frame.Name {
 		case "subscribe_pairing":
 			var body struct {
 				SubscriptionKey any `json:"subscription_key"`
 			}
-			_ = req.JSON(&body)
+			if err := req.JSON(&body); err != nil {
+				return err
+			}
 			key := parseSubscriptionKey(body.SubscriptionKey)
 
 			ps.mu.Lock()
-			ps.subs[key] = struct{}{}
+			ps.subs[key] = req.frame.RequestID
 			ps.mu.Unlock()
 
 			return req.SendContinue("Subscribed", map[string]string{"paired_core_id": string(s.creds.PairedCoreID)})
@@ -44,7 +48,9 @@ func (s *session) registerPairingService() {
 			var body struct {
 				SubscriptionKey any `json:"subscription_key"`
 			}
-			_ = req.JSON(&body)
+			if err := req.JSON(&body); err != nil {
+				return err
+			}
 			key := parseSubscriptionKey(body.SubscriptionKey)
 
 			ps.mu.Lock()
@@ -67,10 +73,8 @@ func (s *session) registerPairingService() {
 
 			// Notify subscribers (best-effort).
 			ps.mu.Lock()
-			for subKey := range ps.subs {
-				_ = subKey
-				// Node implementation broadcasts via the service registry. We'll keep it minimal for now.
-				// The important part for our CLI is that we observe pairing and persist creds.
+			for _, requestID := range ps.subs {
+				_ = s.conn.sendContinue(requestID, "Changed", map[string]string{"paired_core_id": string(s.creds.PairedCoreID)})
 			}
 			ps.mu.Unlock()
 

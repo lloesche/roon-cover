@@ -1,23 +1,28 @@
 package cli
 
 import (
+	"context"
 	"errors"
 	"strings"
+	"time"
 
+	"roon-cover/internal/display"
 	"roon-cover/internal/roon"
 
 	"github.com/spf13/cobra"
-	"github.com/spf13/viper"
 )
 
-func ensureCoreAndPaired(cmd *cobra.Command, client *roon.Client) (roon.Core, error) {
-	ctx := cmd.Context()
+func ensureCoreAndPaired(ctx context.Context, cmd *cobra.Command, client *roon.Client, status func(display.Status)) (roon.Core, error) {
 	l := LoggerFromContext(ctx)
 
-	coreName := strings.TrimSpace(viper.GetString("roon.core"))
+	coreName := strings.TrimSpace(configFor(cmd).GetString("roon.core"))
 	core, err := resolveCore(ctx, client, coreName)
 	if err != nil {
 		return roon.Core{}, err
+	}
+	if status != nil {
+		status(display.Status{Title: "found " + core.Name, Hold: 700 * time.Millisecond, AppendInline: true})
+		status(display.Status{Title: "Connecting to " + core.Name + "…", Hold: 300 * time.Millisecond})
 	}
 
 	store, err := roon.NewFileCredentialStore("roon-cover")
@@ -40,7 +45,10 @@ func ensureCoreAndPaired(cmd *cobra.Command, client *roon.Client) (roon.Core, er
 		return core, nil
 	}
 
-	l.Info("pairing required; approve the extension in Roon", "core", core.Name)
+	if status == nil {
+		return roon.Core{}, errors.New("Roon is not paired; open roon-cover to complete pairing in its window")
+	}
+	status(display.Status{Title: "Connect to " + core.Name, Detail: "In Roon, open Settings → Extensions", Hint: "Enable roon-cover to continue."})
 	newCreds, err := client.Pair(ctx, core)
 	if err != nil {
 		return roon.Core{}, err

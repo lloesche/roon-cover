@@ -244,6 +244,13 @@ func (c *Client) DiscoverWithOptions(ctx context.Context, opt discoverOptions) (
 	}
 
 	<-ctx.Done()
+	_ = recvBroadcast.Close()
+	for _, cn := range mcastConns {
+		_ = cn.Close()
+	}
+	for _, cn := range senders {
+		_ = cn.Close()
+	}
 	wg.Wait()
 
 	out := make([]Core, 0, len(seen))

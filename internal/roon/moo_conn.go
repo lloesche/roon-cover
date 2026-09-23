@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"net"
 	"net/url"
 	"sync"
 	"sync/atomic"
@@ -28,6 +29,9 @@ type mooConn struct {
 }
 
 type pendingRequest struct {
+	mu         sync.Mutex
+	finishOnce sync.Once
+
 	onFrame func(*mooFrame) error
 	done    chan error // closed on COMPLETE (or connection close)
 	// Some Roon Core calls reply with CONTINUE only (no COMPLETE).
@@ -62,13 +66,16 @@ func dialMoo(ctx context.Context, log *slog.Logger, host string, port int) (*moo
 	if log == nil {
 		log = slog.Default()
 	}
-	u := url.URL{Scheme: "ws", Host: fmt.Sprintf("%s:%d", host, port), Path: "/api"}
+	u := url.URL{Scheme: "ws", Host: net.JoinHostPort(host, fmt.Sprint(port)), Path: "/api"}
 
-	ws, _, err := websocket.Dial(ctx, u.String(), nil)
+	dialCtx, dialCancel := context.WithTimeout(ctx, 5*time.Second)
+	defer dialCancel()
+	ws, _, err := websocket.Dial(dialCtx, u.String(), nil)
 	if err != nil {
 		return nil, err
 	}
 
+	ws.SetReadLimit(maxMooFrameBytes)
 	c := &mooConn{
 		log:      log,
 		ws:       ws,
@@ -82,25 +89,25 @@ func dialMoo(ctx context.Context, log *slog.Logger, host string, port int) (*moo
 	return c, nil
 }
 
+func (p *pendingRequest) finish(err error) {
+	p.finishOnce.Do(func() { p.done <- err })
+}
 func (c *mooConn) Close() error {
-	var err error
 	c.closeOnce.Do(func() {
 		close(c.closed)
-		err = c.ws.Close(websocket.StatusNormalClosure, "closing")
-		c.mu.Lock()
-		for _, p := range c.pending {
-			select {
-			case p.done <- errors.New("moo: connection closed"):
-			default:
-			}
-			close(p.done)
+		if c.ws != nil {
+			_ = c.ws.CloseNow()
 		}
+		c.mu.Lock()
+		pending := c.pending
 		c.pending = map[string]*pendingRequest{}
 		c.mu.Unlock()
+		for _, p := range pending {
+			p.finish(errors.New("moo: connection closed"))
+		}
 	})
-	return err
+	return nil
 }
-
 func (c *mooConn) RegisterHandler(service string, h serviceHandler) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -108,6 +115,8 @@ func (c *mooConn) RegisterHandler(service string, h serviceHandler) {
 }
 
 func (c *mooConn) Call(ctx context.Context, fullName string, reqBody any, onComplete func(*mooFrame) error) error {
+	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
 	reqID := c.nextReqID.Add(1) - 1
 	buf, err := encodeMooRequest(reqID, fullName, reqBody)
 	if err != nil {
@@ -129,9 +138,25 @@ func (c *mooConn) Call(ctx context.Context, fullName string, reqBody any, onComp
 
 	idStr := fmt.Sprintf("%d", reqID)
 	c.mu.Lock()
+	select {
+	case <-c.closed:
+		c.mu.Unlock()
+		return errors.New("moo: connection closed")
+	default:
+	}
 	c.pending[idStr] = p
 	c.mu.Unlock()
 
+	defer func() {
+		p.mu.Lock()
+		p.onFrame = nil
+		p.mu.Unlock()
+		if ctx.Err() != nil {
+			c.mu.Lock()
+			delete(c.pending, idStr)
+			c.mu.Unlock()
+		}
+	}()
 	c.log.Debug("moo -> request", "id", idStr, "name", fullName)
 	if err := c.ws.Write(ctx, websocket.MessageBinary, buf); err != nil {
 		c.mu.Lock()
@@ -168,11 +193,19 @@ func (c *mooConn) Subscribe(ctx context.Context, fullName string, reqBody any, o
 	}
 
 	c.mu.Lock()
+	select {
+	case <-c.closed:
+		c.mu.Unlock()
+		return errors.New("moo: connection closed")
+	default:
+	}
 	c.pending[idStr] = p
 	c.mu.Unlock()
 
 	c.log.Debug("moo -> subscribe request", "id", idStr, "name", fullName)
-	if err := c.ws.Write(ctx, websocket.MessageBinary, buf); err != nil {
+	writeCtx, writeCancel := context.WithTimeout(ctx, 5*time.Second)
+	defer writeCancel()
+	if err := c.ws.Write(writeCtx, websocket.MessageBinary, buf); err != nil {
 		c.mu.Lock()
 		delete(c.pending, idStr)
 		c.mu.Unlock()
@@ -189,7 +222,9 @@ func (c *mooConn) sendContinue(requestID string, name string, body any) error {
 	if err != nil {
 		return err
 	}
-	return c.ws.Write(context.Background(), websocket.MessageBinary, buf)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	return c.ws.Write(ctx, websocket.MessageBinary, buf)
 }
 
 func (c *mooConn) sendComplete(requestID string, name string, body any) error {
@@ -197,7 +232,9 @@ func (c *mooConn) sendComplete(requestID string, name string, body any) error {
 	if err != nil {
 		return err
 	}
-	return c.ws.Write(context.Background(), websocket.MessageBinary, buf)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	return c.ws.Write(ctx, websocket.MessageBinary, buf)
 }
 
 func (c *mooConn) readLoop() {
@@ -246,34 +283,30 @@ func (c *mooConn) handleIncomingRequest(f *mooFrame) {
 func (c *mooConn) handleResponse(f *mooFrame) {
 	c.mu.Lock()
 	p := c.pending[f.RequestID]
+	if f.Verb == mooVerbComplete {
+		delete(c.pending, f.RequestID)
+	}
 	c.mu.Unlock()
-
+	// Late replies to cancelled calls are normal, and must not kill other requests.
 	if p == nil {
-		c.log.Warn("moo response for unknown request", "request_id", f.RequestID, "name", f.ResponseName, "verb", f.Verb)
-		_ = c.Close()
 		return
 	}
-
-	c.log.Debug("moo <- response", "id", f.RequestID, "verb", f.Verb, "name", f.ResponseName)
-	if err := p.onFrame(f); err != nil {
-		select {
-		case p.done <- err:
-		default:
-		}
+	p.mu.Lock()
+	var err error
+	if p.onFrame != nil {
+		err = p.onFrame(f)
 	}
-
-	if f.Verb == mooVerbComplete || p.completeOnFirstResponse {
-		c.mu.Lock()
-		delete(c.pending, f.RequestID)
-		c.mu.Unlock()
-		select {
-		case p.done <- nil:
-		default:
-		}
-		close(p.done)
+	if p.completeOnFirstResponse {
+		p.onFrame = nil
+	}
+	if err != nil || f.Verb == mooVerbComplete || p.completeOnFirstResponse {
+		p.finish(err)
+	}
+	p.mu.Unlock()
+	if err != nil && !p.completeOnFirstResponse {
+		_ = c.Close()
 	}
 }
-
 func (c *mooConn) heartbeatLoop() {
 	t := time.NewTicker(10 * time.Second)
 	defer t.Stop()
@@ -284,8 +317,12 @@ func (c *mooConn) heartbeatLoop() {
 			return
 		case <-t.C:
 			ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-			_ = c.ws.Ping(ctx)
+			err := c.ws.Ping(ctx)
 			cancel()
+			if err != nil {
+				_ = c.Close()
+				return
+			}
 		}
 	}
 }

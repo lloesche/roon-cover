@@ -4,12 +4,21 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net"
+	"strconv"
 	"strings"
 
 	"roon-cover/internal/roon"
 )
 
 func resolveCore(ctx context.Context, client *roon.Client, configuredName string) (roon.Core, error) {
+	if host, portText, err := net.SplitHostPort(strings.TrimSpace(configuredName)); err == nil {
+		port, err := strconv.Atoi(portText)
+		if err != nil || port < 1 || port > 65535 || host == "" {
+			return roon.Core{}, errors.New("invalid Roon Core host:port")
+		}
+		return roon.Core{Name: configuredName, Host: host, Port: port}, nil
+	}
 	cores, err := client.Discover(ctx)
 	if err != nil {
 		return roon.Core{}, err
@@ -40,7 +49,7 @@ func resolveCore(ctx context.Context, client *roon.Client, configuredName string
 
 	switch len(cores) {
 	case 0:
-		return roon.Core{}, errors.New("no roon cores discovered; set --roon-core or ROON_COVER_ROON_CORE (or config roon.core)")
+		return roon.Core{}, errors.New("no roon cores discovered; check the network or use --roon-core host:port to bypass discovery")
 	case 1:
 		return cores[0], nil
 	default:

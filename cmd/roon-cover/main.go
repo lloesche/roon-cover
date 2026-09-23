@@ -8,8 +8,7 @@ import (
 )
 
 func main() {
-	// Required for SDL/Cocoa on macOS: initialization must happen on the main thread.
-	// Lock early to ensure Cobra commands that use SDL run on the correct thread.
+	// Graphics initialization must happen on the main OS thread.
 	runtime.LockOSThread()
 
 	os.Exit(cli.Execute())
