@@ -22,15 +22,17 @@ type Options struct {
 	SaveArtwork func(string, []byte, string)
 }
 type Controller struct {
-	Source  Source
-	Core    roon.Core
-	Options Options
-	Log     *slog.Logger
-	Power   func(context.Context, bool) error
-	zones   []roon.Zone
-	active  roon.ZoneID
-	size    int
-	asset   *display.Artwork
+	Source    Source
+	Core      roon.Core
+	Options   Options
+	Log       *slog.Logger
+	Power     func(context.Context, bool) error
+	zones     []roon.Zone
+	active    roon.ZoneID
+	size      int
+	asset     *display.Artwork
+	lastScene display.Update
+	sceneZone roon.ZoneID
 }
 
 func (c *Controller) Initialize(zones []roon.Zone) error {
@@ -97,10 +99,17 @@ func (c *Controller) cycle(kind display.EventKind) {
 	c.active = c.zones[(i+delta+len(c.zones))%len(c.zones)].ID
 }
 
-// scene is pure with respect to I/O. Fetching and decoding never block selection.
+// scene never performs I/O. Loading is a transition within playback, not a
+// request to blank: retain the last complete scene until playback resumes.
 func (c *Controller) scene() display.Update {
 	z := c.selected()
 	scene := display.Update{Zone: z.Name}
+	if z.State == roon.ZoneStateLoading && z.ID == c.sceneZone {
+		scene = c.lastScene
+		scene.Zone = z.Name
+		return scene
+	}
+	defer func() { c.lastScene, c.sceneZone = scene, z.ID }()
 	if z.State != roon.ZoneStatePlaying || z.NowPlaying == nil {
 		return scene
 	}
@@ -191,7 +200,7 @@ func (c *Controller) Run(ctx context.Context, scenes chan display.Update, info <
 		case <-tick.C:
 		}
 		z := c.selected()
-		if connected && z.State == roon.ZoneStatePlaying {
+		if connected && (z.State == roon.ZoneStatePlaying || z.State == roon.ZoneStateLoading) {
 			idleSince = time.Time{}
 			publishPower(power, false)
 		} else if idleSince.IsZero() {
@@ -232,6 +241,7 @@ func (c *Controller) Run(ctx context.Context, scenes chan display.Update, info <
 			scene := c.scene()
 			if !connected {
 				scene = display.Update{Zone: z.Name}
+				c.lastScene, c.sceneZone = scene, ""
 			}
 			display.Publish(scenes, scene)
 		}

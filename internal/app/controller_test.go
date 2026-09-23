@@ -91,3 +91,46 @@ func TestCoverReplacementKeepsFadeSourceWhileLoading(t *testing.T) {
 		t.Fatal("track without artwork must not retain the previous cover")
 	}
 }
+
+func TestLoadingRetainsSceneButPauseStillBlanks(t *testing.T) {
+	c := Controller{}
+	z := roon.Zone{ID: "a", Name: "A", State: roon.ZoneStatePlaying, NowPlaying: &roon.NowPlaying{ImageKey: "old", Title: "Old title"}}
+	if err := c.Initialize([]roon.Zone{z}); err != nil {
+		t.Fatal(err)
+	}
+	old := &display.Artwork{Key: "old/800"}
+	c.asset = old
+	first := c.scene()
+	z.State, z.NowPlaying = roon.ZoneStateLoading, nil
+	c.replace([]roon.Zone{z})
+	for i := 0; i < 3; i++ {
+		if loading := c.scene(); loading.Artwork != old || loading.NowPlaying != first.NowPlaying {
+			t.Fatal("loading update must not insert a black frame or erase metadata")
+		}
+	}
+	z.State = roon.ZoneStatePlaying
+	z.NowPlaying = &roon.NowPlaying{ImageKey: "next", Title: "Next title"}
+	c.replace([]roon.Zone{z})
+	if pending := c.scene(); pending.Artwork != old || pending.NowPlaying.Title != "Next title" {
+		t.Fatal("playback must keep the outgoing image until the replacement is ready")
+	}
+	c.asset = &display.Artwork{Key: "next/800"}
+	if ready := c.scene(); ready.Artwork != c.asset || ready.NoFade {
+		t.Fatal("replacement must be allowed to crossfade")
+	}
+	z.State = roon.ZoneStatePaused
+	c.replace([]roon.Zone{z})
+	if paused := c.scene(); paused.Artwork != nil || paused.NowPlaying != nil {
+		t.Fatal("pause must blank immediately")
+	}
+	z.State = roon.ZoneStateLoading
+	c.replace([]roon.Zone{z})
+	if c.scene().Artwork != nil {
+		t.Fatal("loading after pause must not resurrect an old scene")
+	}
+	z.ID = "b"
+	c.replace([]roon.Zone{z})
+	if c.scene().Artwork != nil {
+		t.Fatal("loading another zone must not resurrect an old scene")
+	}
+}
