@@ -33,6 +33,10 @@ func statusLines(status *Status) []string {
 }
 
 func (g *windowGame) setStatus(status *Status, now time.Time) {
+	if status != nil && status.FadeOut && (g.status == nil || !g.status.FadeOut) {
+		g.statusFadeStart = now
+		g.cover.fadeInNext = true
+	}
 	lines := statusLines(status)
 	common := 0
 	for common < len(lines) && common < len(g.statusRows) && lines[common] == g.statusRows[common].value {
@@ -64,7 +68,7 @@ func (g *windowGame) clearStatusImage() {
 // shift as new steps arrive. Scale down the instructions on smaller displays.
 func statusLayout(text *textEngine, width, height int, scale float64, count int) (x, y, lineWidth, lineHeight int, textScale float64) {
 	pad := max(1, int(math.Round(24*scale)))
-	slots := max(12, count)
+	slots := max(9, count)
 	textScale = min(scale, float64(max(1, height-2*pad))/(float64(slots)*text.size*1.7))
 	lineHeight = max(1, int(math.Ceil(text.size*textScale*1.7)))
 	lineWidth = max(1, min(width-2*pad, int(960*scale)))
@@ -74,7 +78,16 @@ func statusLayout(text *textEngine, width, height int, scale float64, count int)
 }
 
 func (g *windowGame) drawStatus(screen *ebiten.Image) {
-	screen.Fill(color.NRGBA{R: 18, G: 22, B: 30, A: 255})
+	alphaAll := 1.0
+	settled := true
+	if g.status.FadeOut {
+		alphaAll = 0
+		if g.cover.duration > 0 {
+			alphaAll = 1 - g.cover.ease(clamp01(float64(g.now.Sub(g.statusFadeStart))/float64(g.cover.duration)))
+		}
+		settled = alphaAll <= 0
+	}
+	screen.Fill(color.NRGBA{R: uint8(18 * alphaAll), G: uint8(22 * alphaAll), B: uint8(30 * alphaAll), A: 255})
 	x, y, width, lineHeight, scale := statusLayout(g.text, g.width, g.height, g.scale, len(g.statusRows))
 	for i := range g.statusRows {
 		row := &g.statusRows[i]
@@ -91,10 +104,19 @@ func (g *windowGame) drawStatus(screen *ebiten.Image) {
 		if g.cover.duration > 0 {
 			alpha = g.cover.ease(clamp01(float64(g.now.Sub(row.start)) / float64(g.cover.duration)))
 		}
+		if !g.status.FadeOut && alpha < 1 {
+			settled = false
+		}
 		opts := &ebiten.DrawImageOptions{}
 		opts.GeoM.Translate(float64(x), float64(y+i*lineHeight))
-		opts.ColorScale.ScaleAlpha(float32(alpha))
+		opts.ColorScale.ScaleAlpha(float32(alpha * alphaAll))
 		screen.DrawImage(row.image, opts)
+	}
+	if settled {
+		select {
+		case g.status.Settled <- struct{}{}:
+		default:
+		}
 	}
 }
 

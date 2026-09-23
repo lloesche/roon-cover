@@ -9,10 +9,10 @@ import (
 
 // One worker owns startup and playback; retry never creates overlapping sessions.
 // Kiosks have no input devices, so retries and progression are automatic.
-func runStartup(ctx context.Context, scenes chan display.Update, retryDelay, stepDuration time.Duration, attempt func(func(display.Status)) error) error {
+func runStartup(ctx context.Context, scenes chan display.Update, retryDelay time.Duration, attempt func(func(display.Status)) error) error {
 	status := func(s display.Status) { display.Publish(scenes, display.Update{Status: &s, NoFade: true}) }
 	for ctx.Err() == nil {
-		err := presentStartupAttempt(ctx, status, stepDuration, attempt)
+		err := presentStartupAttempt(ctx, status, attempt)
 		if ctx.Err() != nil {
 			return nil
 		}
@@ -34,7 +34,7 @@ func runStartup(ctx context.Context, scenes chan display.Update, retryDelay, ste
 
 // Network work runs ahead of presentation. Only the startup handoff waits for
 // the ordered screens; a fast connection cannot overwrite unread phases.
-func presentStartupAttempt(ctx context.Context, show func(display.Status), step time.Duration, attempt func(func(display.Status)) error) error {
+func presentStartupAttempt(ctx context.Context, show func(display.Status), attempt func(func(display.Status)) error) error {
 	phases := make(chan display.Status, 8)
 	done := make(chan error, 1)
 	var transcript []string
@@ -45,7 +45,7 @@ func presentStartupAttempt(ctx context.Context, show func(display.Status), step 
 			case <-ctx.Done():
 			}
 		}
-		report(display.Status{Title: "Looking for Roon…", Detail: "Searching for your Roon Server."})
+		report(display.Status{Title: "Looking for Roon…", Hold: 500 * time.Millisecond})
 		err := attempt(report)
 		close(phases)
 		done <- err
@@ -59,8 +59,8 @@ func presentStartupAttempt(ctx context.Context, show func(display.Status), step 
 			if !ok {
 				err := <-done
 				if err == nil {
-					waitStartup(ctx, step)
-				} // Final zone announcement: two steps.
+					showStartupPhase(ctx, show, display.Status{Lines: transcript, FadeOut: true})
+				}
 				return err
 			}
 			for _, line := range []string{phase.Title, phase.Detail, phase.Hint} {
@@ -70,10 +70,21 @@ func presentStartupAttempt(ctx context.Context, show func(display.Status), step 
 			}
 			// Complete immutable snapshots survive coalescing in the renderer.
 			phase.Lines = append([]string(nil), transcript...)
-			show(phase)
-			waitStartup(ctx, step)
+			showStartupPhase(ctx, show, phase)
 		}
 	}
+}
+
+func showStartupPhase(ctx context.Context, show func(display.Status), phase display.Status) {
+	settled := make(chan struct{}, 1)
+	phase.Settled = settled
+	show(phase)
+	select {
+	case <-ctx.Done():
+		return
+	case <-settled:
+	}
+	waitStartup(ctx, phase.Hold)
 }
 
 func waitStartup(ctx context.Context, duration time.Duration) {

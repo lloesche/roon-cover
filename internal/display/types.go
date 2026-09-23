@@ -1,6 +1,9 @@
 package display
 
-import "image"
+import (
+	"image"
+	"time"
+)
 
 // Update is a complete desired scene. Assets are immutable; nil means blank.
 type Update struct {
@@ -15,7 +18,11 @@ type Update struct {
 type Status struct {
 	Title, Detail, Hint string
 	// Lines is an immutable, cumulative startup transcript when present.
-	Lines []string
+	Lines   []string
+	Hold    time.Duration
+	FadeOut bool
+	// Settled is signaled after drawing the fully faded-in (or out) status.
+	Settled chan<- struct{}
 }
 
 type Metadata struct{ Title, Artist, Album string }

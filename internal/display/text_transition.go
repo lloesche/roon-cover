@@ -12,6 +12,14 @@ type textTransition struct {
 	duration, hold           time.Duration
 	expires                  time.Time
 	ease                     func(float64) float64
+	entry                    bool
+}
+
+func (t *textTransition) phaseDuration() time.Duration {
+	if t.entry {
+		return t.duration
+	}
+	return t.duration / 2
 }
 
 func (t *textTransition) opacity(now time.Time) float64 {
@@ -21,7 +29,7 @@ func (t *textTransition) opacity(now time.Time) float64 {
 	if t.phase == textPhaseNone {
 		return 1
 	}
-	half := t.duration / 2
+	half := t.phaseDuration()
 	if half <= 0 {
 		return 1
 	}
@@ -41,12 +49,14 @@ func (t *textTransition) set(value string, now time.Time, immediate bool) bool {
 	t.target = value
 	t.expires = time.Time{}
 	if value == "" || immediate || t.duration <= 0 || t.value == "" {
+		t.entry = false
 		t.value = value
 		t.phase = textPhaseNone
 		t.scheduleExpiry(now)
 		return true
 	}
 	t.from = t.opacity(now)
+	t.entry = false
 	t.start = now
 	t.phase = textPhaseFadeOut
 	if value == t.value {
@@ -62,7 +72,7 @@ func (t *textTransition) scheduleExpiry(now time.Time) {
 }
 func (t *textTransition) advance(now time.Time) bool {
 	changed := t.phase != textPhaseNone
-	if t.phase != textPhaseNone && now.Sub(t.start) >= t.duration/2 {
+	if t.phase != textPhaseNone && now.Sub(t.start) >= t.phaseDuration() {
 		if t.phase == textPhaseFadeOut {
 			t.value = t.target
 			t.start = t.start.Add(t.duration / 2)
@@ -70,8 +80,9 @@ func (t *textTransition) advance(now time.Time) bool {
 			t.phase = textPhaseFadeIn
 			t.scheduleExpiry(t.start)
 		}
-		if t.value == "" || now.Sub(t.start) >= t.duration/2 {
+		if t.value == "" || now.Sub(t.start) >= t.phaseDuration() {
 			t.phase = textPhaseNone
+			t.entry = false
 		}
 	}
 	if !t.expires.IsZero() && !now.Before(t.expires) {

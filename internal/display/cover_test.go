@@ -136,4 +136,47 @@ func TestStartupLineFadePreservesEarlierText(t *testing.T) {
 	if !(before < mid && mid < end) {
 		t.Fatal("new text did not fade in gradually")
 	}
+	settled := make(chan struct{}, 1)
+	g.setStatus(&Status{Lines: []string{"Looking for Roon…", "Found blackhole"}, FadeOut: true, Settled: settled}, now.Add(2*time.Second))
+	startOut := brightness(now.Add(2 * time.Second))
+	midOut := brightness(now.Add(2500 * time.Millisecond))
+	select {
+	case <-settled:
+		t.Fatal("fade-out acknowledged before finishing")
+	default:
+	}
+	endOut := brightness(now.Add(3 * time.Second))
+	if !(startOut > midOut && midOut > endOut && endOut == 0) {
+		t.Fatal("startup did not fade completely to black")
+	}
+	select {
+	case <-settled:
+	default:
+		t.Fatal("completed fade-out was not acknowledged")
+	}
+	g.setStatus(nil, now.Add(3*time.Second))
+	pixels := image.NewNRGBA(image.Rect(0, 0, 4, 4))
+	for y := 0; y < 4; y++ {
+		for x := 0; x < 4; x++ {
+			pixels.SetNRGBA(x, y, color.NRGBA{255, 255, 255, 255})
+		}
+	}
+	g.cover.width, g.cover.height = 800, 800
+	g.cover.set(&Artwork{Key: "first", Pixels: pixels}, false, now.Add(3*time.Second))
+	coverPixel := func(at time.Time) uint8 {
+		out.Fill(color.Black)
+		g.cover.draw(out, at)
+		p := make([]byte, 800*800*4)
+		out.ReadPixels(p)
+		return p[(400*800+400)*4]
+	}
+	if coverPixel(now.Add(3*time.Second)) != 0 {
+		t.Fatal("first cover snapped on after startup")
+	}
+	if p := coverPixel(now.Add(3500 * time.Millisecond)); p < 126 || p > 129 {
+		t.Fatalf("first cover did not fade in: %d", p)
+	}
+	if coverPixel(now.Add(4*time.Second)) != 255 {
+		t.Fatal("first cover fade never finished")
+	}
 }

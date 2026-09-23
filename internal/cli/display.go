@@ -73,7 +73,7 @@ func runKiosk(cmd *cobra.Command) error {
 	go func() {
 		defer close(updates)
 		var controller *app.Controller
-		err := runStartup(ctx, updates, 5*time.Second, time.Second, func(status func(display.Status)) error {
+		err := runStartup(ctx, updates, 5*time.Second, func(status func(display.Status)) error {
 			client := roon.NewClient(roon.Config{DisplayName: "roon-cover"}, roon.WithLogger(l))
 			core, err := ensureCoreAndPaired(ctx, cmd, client, status)
 			if err != nil {
@@ -83,7 +83,8 @@ func runKiosk(cmd *cobra.Command) error {
 			if err != nil {
 				return err
 			}
-			status(display.Status{Title: "Connected to " + core.Name, Detail: "Choosing your listening zone…"})
+			status(display.Status{Title: "Connected", Hold: time.Second})
+			status(display.Status{Title: "Choosing listening zone…", Hold: 500 * time.Millisecond})
 			controller = &app.Controller{Source: client, Core: core, Log: l, Options: app.Options{Zone: configFor(cmd).GetString("roon.zone"), SleepAfter: time.Duration(sleepIdleSec) * time.Second}, Power: func(ctx context.Context, sleep bool) error {
 				if sleep {
 					return powerCtl.Sleep(ctx)
@@ -97,18 +98,7 @@ func runKiosk(cmd *cobra.Command) error {
 				return err
 			}
 			zone := controller.SelectedZone()
-			message := display.Status{Title: "Using " + zone.Name, Detail: "No zone specified. Using a playing zone."}
-			if controller.Options.Zone != "" {
-				message.Detail = "Using your configured zone."
-			} else if zone.State != roon.ZoneStatePlaying {
-				message.Detail = "No zone specified. Using the first available zone."
-			}
-			if zone.State == roon.ZoneStatePlaying {
-				message.Hint = "Displaying now playing…"
-			} else {
-				message.Hint = "The screen will stay blank until playback starts."
-			}
-			status(message)
+			status(display.Status{Title: zone.Name, Hold: 2 * time.Second})
 			return nil
 		})
 		if err == nil && ctx.Err() == nil {

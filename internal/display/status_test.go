@@ -17,11 +17,8 @@ func TestPairingStatusRaster(t *testing.T) {
 	}
 	defer engine.close()
 	pixels, err := renderStatus(engine, Status{Lines: []string{
-		"Looking for Roon…", "Searching for your Roon Server.",
-		"Found blackhole", "Connecting to Roon…",
-		"Connect to blackhole", "In Roon, open Settings → Extensions", "Enable roon-cover to continue.",
-		"Connected to blackhole", "Choosing your listening zone…",
-		"Using Dialysis", "No zone specified. Using a playing zone.", "Displaying now playing…",
+		"Looking for Roon…", "Found blackhole", "Connecting to blackhole…",
+		"Connected", "Choosing listening zone…", "Dialysis",
 	}}, 800, 800, 1)
 	if err != nil {
 		t.Fatal(err)

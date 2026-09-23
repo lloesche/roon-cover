@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"strings"
+	"time"
 
 	"roon-cover/internal/display"
 	"roon-cover/internal/roon"
@@ -20,7 +21,8 @@ func ensureCoreAndPaired(ctx context.Context, cmd *cobra.Command, client *roon.C
 		return roon.Core{}, err
 	}
 	if status != nil {
-		status(display.Status{Title: "Found " + core.Name, Detail: "Connecting to Roon…"})
+		status(display.Status{Title: "Found " + core.Name, Hold: time.Second})
+		status(display.Status{Title: "Connecting to " + core.Name + "…", Hold: 500 * time.Millisecond})
 	}
 
 	store, err := roon.NewFileCredentialStore("roon-cover")

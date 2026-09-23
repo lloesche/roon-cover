@@ -16,6 +16,7 @@ type coverLayer struct {
 	start             time.Time
 	duration          time.Duration
 	ease              func(float64) float64
+	fadeInNext        bool
 }
 
 func (c *coverLayer) close() {
@@ -68,7 +69,7 @@ func (c *coverLayer) set(asset *Artwork, noFade bool, now time.Time) {
 	canvas.DrawImage(texture, opts)
 	texture.Deallocate()
 	var previous *ebiten.Image
-	if !noFade && c.duration > 0 && c.current != nil {
+	if !noFade && c.duration > 0 && (c.current != nil || c.fadeInNext) {
 		previous = ebiten.NewImage(max(1, c.width), max(1, c.height))
 		previous.Fill(color.Black)
 		c.draw(previous, now)
@@ -78,6 +79,7 @@ func (c *coverLayer) set(asset *Artwork, noFade bool, now time.Time) {
 	c.previous = previous
 	c.asset = asset
 	c.start = now
+	c.fadeInNext = false
 }
 func (c *coverLayer) resize(w, h int, now time.Time) {
 	asset := c.asset

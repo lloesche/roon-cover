@@ -48,6 +48,7 @@ type windowGame struct {
 	presented, minimumMode bool
 	status                 *Status
 	statusRows             []statusRow
+	statusFadeStart        time.Time
 }
 
 func (d *Window) Run(ctx context.Context, updates <-chan Update) error {
@@ -145,6 +146,7 @@ func (g *windowGame) Update() error {
 	select {
 	case scene := <-g.scenes:
 		g.setStatus(scene.Status, g.now)
+		firstCover := g.cover.fadeInNext && scene.Artwork != nil
 		g.cover.set(scene.Artwork, scene.NoFade, g.now)
 		values := [4]string{"", "", "", scene.Zone}
 		if scene.NowPlaying != nil {
@@ -157,6 +159,12 @@ func (g *windowGame) Update() error {
 				value = ""
 			}
 			g.lines[i].animation.set(strings.TrimSpace(value), g.now, scene.NoFade)
+			if firstCover && value != "" && g.cover.duration > 0 {
+				g.lines[i].animation.phase = textPhaseFadeIn
+				g.lines[i].animation.from = 0
+				g.lines[i].animation.start = g.now
+				g.lines[i].animation.entry = true
+			}
 		}
 	default:
 	}
@@ -183,6 +191,9 @@ func (g *windowGame) Update() error {
 }
 func (g *windowGame) schedule() {
 	delay := time.Duration(0)
+	if g.status != nil && g.status.FadeOut && g.now.Sub(g.statusFadeStart) < g.cover.duration {
+		delay = time.Second / 60
+	}
 	if g.cover.active(g.now) {
 		delay = time.Second / 60
 	}

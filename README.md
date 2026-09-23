@@ -72,7 +72,7 @@ go run ./cmd/roon-cover --roon-core 192.168.1.10:9330 --window
 
 The former `roon pair` console command has been removed. Pairing takes place through the display startup flow. The `roon zones` diagnostic requires an existing pairing and never prompts for console pairing.
 
-Startup shows discovery, connection, and zone selection as an accumulating list on one screen. New lines fade in underneath the earlier lines, which remain visible and stationary. Steps appear at least one second apart; the completed list stays for two seconds after the zone announcement. Connection work proceeds in the background. This fixed pacing applies only to startup, with no setting, and does not delay reconnection or song transitions.
+Startup shows an accumulating list on one screen: “Looking for Roon…” (500 ms hold), “Found [server]” (1 second), “Connecting to [server]…” (500 ms), “Connected” (1 second), “Choosing listening zone…” (500 ms), and the selected zone name (2 seconds). Each hold begins after that line finishes fading in. The completed screen then fades out, followed by the first cover fading in. Earlier lines remain visible and stationary. Connection work proceeds in the background; slower operations wait for real results before reporting success. This fixed pacing applies only to startup, with no new setting, and does not delay reconnection or song transitions.
 
 `--roon-core` accepts a discovered name or an explicit `host:port` to bypass discovery. Use your Core's actual HTTP/API port; the example port is not a universal default. IPv6 addresses use `[address]:port`.
 
