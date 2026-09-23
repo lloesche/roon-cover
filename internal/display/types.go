@@ -1,5 +1,7 @@
 package display
 
+import "image"
+
 // Update is a complete desired scene. Assets are immutable; nil means blank.
 type Update struct {
 	Zone       string
@@ -10,8 +12,8 @@ type Update struct {
 
 type Metadata struct{ Title, Artist, Album string }
 type Artwork struct {
-	Key  string
-	Data []byte
+	Key    string
+	Pixels *image.NRGBA
 }
 
 // Publish replaces an obsolete complete scene. Only the owning producer calls it.

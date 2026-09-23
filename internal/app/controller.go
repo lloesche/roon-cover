@@ -114,7 +114,12 @@ func (c *Controller) scene(ctx context.Context) display.Update {
 			c.Log.Warn("artwork fetch failed", "err", err)
 			return scene
 		}
-		c.asset = &display.Artwork{Key: key, Data: data}
+		asset, err := display.DecodeArtwork(key, data)
+		if err != nil {
+			c.Log.Warn("artwork decode failed", "err", err)
+			return scene
+		}
+		c.asset = asset
 		if c.Options.SaveArtwork != nil {
 			c.Options.SaveArtwork(z.Name, data, mime)
 		}

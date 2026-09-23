@@ -1,7 +1,10 @@
 package app
 
 import (
+	"bytes"
 	"context"
+	"image"
+	"image/png"
 	"log/slog"
 	"roon-cover/internal/display"
 	"roon-cover/internal/roon"
@@ -15,7 +18,9 @@ func (s *source) SubscribeZones(context.Context, roon.Core, func(roon.ZoneUpdate
 }
 func (s *source) FetchImage(context.Context, roon.Core, roon.ImageKey, roon.ImageFetchOptions) ([]byte, string, error) {
 	s.calls++
-	return []byte("image"), "image/jpeg", nil
+	var b bytes.Buffer
+	_ = png.Encode(&b, image.NewNRGBA(image.Rect(0, 0, 1, 1)))
+	return b.Bytes(), "image/png", nil
 }
 func TestPauseResumeRestoresCompleteScene(t *testing.T) {
 	s := &source{}

@@ -3,17 +3,12 @@
 package display
 
 import (
-	"bytes"
 	"context"
 	"errors"
-	"image"
-	"image/draw"
-	_ "image/jpeg"
-	_ "image/png"
+
 	"math"
 	"strings"
 	"time"
-	"unsafe"
 
 	"github.com/veandco/go-sdl2/sdl"
 	"github.com/veandco/go-sdl2/ttf"
@@ -236,24 +231,8 @@ func (d *SDLDisplay) Run(ctx context.Context, updates <-chan Update) error {
 	// Report initial output size (important for choosing cover fetch size).
 	reportOutputSize()
 
-	var currentArtwork *Artwork
-	var currTex *sdl.Texture
-	var prevTex *sdl.Texture
-	defer func() {
-		if currTex != nil {
-			currTex.Destroy()
-		}
-		if prevTex != nil {
-			prevTex.Destroy()
-		}
-	}()
-
-	var currW, currH int32
-	var prevW, prevH int32
-
-	var coverFading bool
-	var coverFadeStart time.Time
-
+	cover := coverLayer{ren: ren, duration: fadeDur, ease: ease}
+	defer cover.close()
 	type textLine struct {
 		key string
 
@@ -320,7 +299,8 @@ func (d *SDLDisplay) Run(ctx context.Context, updates <-chan Update) error {
 	}()
 
 	render := func() error {
-		ww, wh, err := ren.GetOutputSize()
+		frameNow := time.Now()
+		_, wh, err := ren.GetOutputSize()
 		if err != nil {
 			return err
 		}
@@ -331,26 +311,9 @@ func (d *SDLDisplay) Run(ctx context.Context, updates <-chan Update) error {
 			return err
 		}
 
-		drawTex := func(tex *sdl.Texture, tw, th int32) error {
-			if tex == nil {
-				return nil
-			}
-			dst := fitRect(tw, th, int32(ww), int32(wh))
-			return ren.Copy(tex, nil, &dst)
+		if err := cover.draw(frameNow); err != nil {
+			return err
 		}
-
-		// Draw prev first, then curr on top (during fades).
-		if prevTex != nil {
-			if err := drawTex(prevTex, prevW, prevH); err != nil {
-				return err
-			}
-		}
-		if currTex != nil {
-			if err := drawTex(currTex, currW, currH); err != nil {
-				return err
-			}
-		}
-
 		// drawLine draws a line texture at (x,y). We fade text via alpha modulation.
 		// A small gamma curve helps keep the fade perceptually smooth and avoids "black ghost" artifacts.
 		drawLine := func(tex *sdl.Texture, tw, th int32, x, y int32, intensity float64) error {
@@ -393,7 +356,7 @@ func (d *SDLDisplay) Run(ctx context.Context, updates <-chan Update) error {
 		if d.ShowZone && zoneLine.currTex != nil && strings.TrimSpace(zoneLine.currStr) != "" {
 			alpha := 1.0
 			if zoneLine.phase != 0 && fontFadeDur > 0 {
-				t := float64(time.Since(zoneLine.fadeStart)) / float64(fontFadeDur)
+				t := float64(frameNow.Sub(zoneLine.fadeStart)) / float64(fontFadeDur)
 				alpha = textIntensity(zoneLine.phase, t, ease)
 			}
 			pad := int32(24)
@@ -432,7 +395,7 @@ func (d *SDLDisplay) Run(ctx context.Context, updates <-chan Update) error {
 			h := ln.currH
 			alpha := 1.0
 			if ln.phase != 0 && fontFadeDur > 0 {
-				t := float64(time.Since(ln.fadeStart)) / float64(fontFadeDur)
+				t := float64(time.Now().Sub(ln.fadeStart)) / float64(fontFadeDur)
 				alpha = textIntensity(ln.phase, t, ease)
 			}
 			if err := drawLine(ln.currTex, ln.currW, ln.currH, x, y, alpha); err != nil {
@@ -451,7 +414,8 @@ func (d *SDLDisplay) Run(ctx context.Context, updates <-chan Update) error {
 		return err
 	}
 
-	eventsTick := time.NewTicker(16 * time.Millisecond)
+	dirty := false
+	eventsTick := time.NewTimer(16 * time.Millisecond)
 	defer eventsTick.Stop()
 
 	for {
@@ -467,84 +431,12 @@ func (d *SDLDisplay) Run(ctx context.Context, updates <-chan Update) error {
 			coverUpdatedThisUpdate := false
 			textUpdatedThisUpdate := false
 
-			if u.Artwork == nil && currentArtwork != nil {
-				currentArtwork = nil
-				// Clear both textures and stop any in-flight cover fade.
-				if prevTex != nil {
-					prevTex.Destroy()
-					prevTex = nil
-				}
-				if currTex != nil {
-					currTex.Destroy()
-					currTex = nil
-				}
-				coverFading = false
-				coverUpdatedThisUpdate = true
-			}
-
-			if u.Artwork != nil && u.Artwork != currentArtwork {
-				img, _, err := image.Decode(bytes.NewReader(u.Artwork.Data))
-				if err != nil {
-					// Ignore bad image frames; keep last image.
-					break
-				}
-
-				rgba := image.NewRGBA(img.Bounds())
-				draw.Draw(rgba, rgba.Bounds(), img, img.Bounds().Min, draw.Src)
-
-				// Build a new texture for this frame.
-				newW := int32(rgba.Bounds().Dx())
-				newH := int32(rgba.Bounds().Dy())
-				newTex, err := ren.CreateTexture(sdl.PIXELFORMAT_ABGR8888, sdl.TEXTUREACCESS_STATIC, newW, newH)
-				if err != nil {
+			if u.Artwork != cover.asset {
+				if err := cover.set(u.Artwork, u.NoFade, time.Now()); err != nil {
 					return err
-				}
-				_ = newTex.SetBlendMode(sdl.BLENDMODE_BLEND)
-
-				pitch := rgba.Stride
-				if len(rgba.Pix) == 0 {
-					newTex.Destroy()
-					return errors.New("decoded image has no pixel data")
-				}
-				if err := newTex.Update(nil, unsafe.Pointer(&rgba.Pix[0]), pitch); err != nil {
-					newTex.Destroy()
-					return err
-				}
-
-				currentArtwork = u.Artwork
-				// Install texture (optionally crossfading).
-				if u.NoFade || fadeDur <= 0 || currTex == nil {
-					if prevTex != nil {
-						prevTex.Destroy()
-						prevTex = nil
-					}
-					if currTex != nil {
-						currTex.Destroy()
-						currTex = nil
-					}
-					currTex = newTex
-					currW, currH = newW, newH
-					_ = currTex.SetAlphaMod(255)
-					coverFading = false
-				} else {
-					// If a previous fade is in-flight, discard the older prevTex to avoid leaks.
-					if prevTex != nil {
-						prevTex.Destroy()
-						prevTex = nil
-					}
-					prevTex, prevW, prevH = currTex, currW, currH
-					currTex, currW, currH = newTex, newW, newH
-
-					// Reset alpha mods for a clean crossfade.
-					_ = prevTex.SetAlphaMod(255)
-					_ = currTex.SetAlphaMod(0)
-
-					coverFadeStart = time.Now()
-					coverFading = true
 				}
 				coverUpdatedThisUpdate = true
 			}
-
 			// Update per-line text overlays (if enabled).
 			if len(fonts) > 0 && (d.ShowTitle || d.ShowArtist || d.ShowAlbum || d.ShowZone) {
 				var title, artist, album string
@@ -650,34 +542,10 @@ func (d *SDLDisplay) Run(ctx context.Context, updates <-chan Update) error {
 			}
 
 			// Ensure the very first update renders both cover + text (startup text bug fix).
-			if coverUpdatedThisUpdate || textUpdatedThisUpdate {
-				if err := render(); err != nil {
-					return err
-				}
-			}
+			dirty = dirty || coverUpdatedThisUpdate || textUpdatedThisUpdate
 
 		case <-eventsTick.C:
-			// Progress fade (if active).
-			if coverFading && fadeDur > 0 && prevTex != nil && currTex != nil {
-				t := float64(time.Since(coverFadeStart)) / float64(fadeDur)
-				if t >= 1 {
-					coverFading = false
-					prevTex.Destroy()
-					prevTex = nil
-					_ = currTex.SetAlphaMod(255)
-					if err := render(); err != nil {
-						return err
-					}
-				} else {
-					pA, cA, _ := coverFadeAlphas(t, ease)
-					_ = prevTex.SetAlphaMod(pA)
-					_ = currTex.SetAlphaMod(cA)
-					if err := render(); err != nil {
-						return err
-					}
-				}
-			}
-
+			coverAnimating := cover.previous != nil
 			// Auto-hide zone overlay after a short delay.
 			zoneNeedsHide := false
 			if d.ShowZone && zoneLine.currTex != nil && strings.TrimSpace(zoneLine.currStr) != "" && zoneLine.phase == 0 && !zoneLine.hideAt.IsZero() && time.Now().After(zoneLine.hideAt) && fontFadeDur > 0 {
@@ -697,7 +565,7 @@ func (d *SDLDisplay) Run(ctx context.Context, updates <-chan Update) error {
 				if ln.phase == 0 || fontFadeDur <= 0 {
 					return false
 				}
-				t := float64(time.Since(ln.fadeStart)) / float64(fontFadeDur)
+				t := float64(time.Now().Sub(ln.fadeStart)) / float64(fontFadeDur)
 				if t < 1 {
 					return true
 				}
@@ -735,18 +603,12 @@ func (d *SDLDisplay) Run(ctx context.Context, updates <-chan Update) error {
 				return true
 			}
 
-			needRender := false
+			needRender := dirty || coverAnimating
 			needRender = progressLine(&zoneLine) || needRender
 			needRender = progressLine(&titleLine) || needRender
 			needRender = progressLine(&artistLine) || needRender
 			needRender = progressLine(&albumLine) || needRender
 			needRender = zoneNeedsHide || needRender
-
-			if needRender {
-				if err := render(); err != nil {
-					return err
-				}
-			}
 
 			for {
 				e := sdl.PollEvent()
@@ -770,10 +632,10 @@ func (d *SDLDisplay) Run(ctx context.Context, updates <-chan Update) error {
 						sdl.ShowCursor(sdl.ENABLE)
 					case sdl.WINDOWEVENT_RESIZED, sdl.WINDOWEVENT_SIZE_CHANGED, sdl.WINDOWEVENT_DISPLAY_CHANGED:
 						reportOutputSize()
-						// Ensure the current texture is repainted at the new size.
-						if err := render(); err != nil {
+						if err := cover.resize(time.Now()); err != nil {
 							return err
 						}
+						needRender = true
 					}
 				case *sdl.KeyboardEvent:
 					// Only react on key down (and ignore repeats).
@@ -804,6 +666,17 @@ func (d *SDLDisplay) Run(ctx context.Context, updates <-chan Update) error {
 					}
 				}
 			}
+			if needRender {
+				if err := render(); err != nil {
+					return err
+				}
+				dirty = false
+			}
+			delay := 50 * time.Millisecond
+			if cover.previous != nil || zoneLine.phase != 0 || titleLine.phase != 0 || artistLine.phase != 0 || albumLine.phase != 0 {
+				delay = 16 * time.Millisecond
+			}
+			eventsTick.Reset(delay)
 		}
 	}
 }

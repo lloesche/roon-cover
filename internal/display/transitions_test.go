@@ -33,7 +33,7 @@ func TestCoverFadeAlphas_Linear(t *testing.T) {
 	}
 
 	p, c, done = coverFadeAlphas(0.25, linear)
-	if done || p != 191 || c != 64 {
+	if done || p != 255 || c != 64 {
 		t.Fatalf("t=0.25 got prev=%d curr=%d done=%v", p, c, done)
 	}
 

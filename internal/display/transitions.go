@@ -31,7 +31,7 @@ func coverFadeAlphas(t float64, ease func(float64) float64) (prev, curr uint8, d
 		return 255, 0, false
 	}
 	e := clamp01(ease(t))
-	return alphaU8(1 - e), alphaU8(e), false
+	return 255, alphaU8(e), false
 }
 
 // textIntensity returns the visibility (0..1) for the current text texture for a given phase.
