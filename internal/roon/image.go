@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -21,7 +22,7 @@ func (c *Client) FetchImage(ctx context.Context, core Core, key ImageKey, opt Im
 
 	u := url.URL{
 		Scheme: "http",
-		Host:   fmt.Sprintf("%s:%d", core.Host, core.Port),
+		Host:   net.JoinHostPort(core.Host, strconv.Itoa(core.Port)),
 		Path:   "/api/image/" + url.PathEscape(string(key)),
 	}
 	q := u.Query()
@@ -53,9 +54,16 @@ func (c *Client) FetchImage(ctx context.Context, core Core, key ImageKey, opt Im
 	}
 
 	mimeType = resp.Header.Get("Content-Type")
-	b, err := io.ReadAll(resp.Body)
+	const maxBytes = 24 << 20
+	if resp.ContentLength > maxBytes {
+		return nil, "", errors.New("roon: artwork exceeds 24 MiB")
+	}
+	b, err := io.ReadAll(io.LimitReader(resp.Body, maxBytes+1))
 	if err != nil {
 		return nil, "", err
+	}
+	if len(b) > maxBytes {
+		return nil, "", errors.New("roon: artwork exceeds 24 MiB")
 	}
 	return b, mimeType, nil
 }

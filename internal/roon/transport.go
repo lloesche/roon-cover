@@ -50,12 +50,17 @@ func (c *Client) SubscribeZones(ctx context.Context, core Core, onUpdate func(Zo
 	// For now, we create a new connection and keep it open until ctx is canceled.
 	// In the kiosk app, this will be the main long-lived connection.
 
-	credsStore, _ := NewFileCredentialStore("roon-cover")
+	credsStore, err := c.credentialStore()
+	if err != nil {
+		return err
+	}
 	var creds Credentials
 	if credsStore != nil {
-		if loaded, ok, err := credsStore.Load(ctx, core); err == nil && ok {
-			creds = loaded
+		loaded, _, loadErr := credsStore.Load(ctx, core)
+		if loadErr != nil {
+			return loadErr
 		}
+		creds = loaded
 	}
 
 	s, err := c.connectAndRegister(ctx, core, &creds)
@@ -65,9 +70,12 @@ func (c *Client) SubscribeZones(ctx context.Context, core Core, onUpdate func(Zo
 	// Keep connection alive until ctx ends.
 	defer s.conn.Close()
 
+	creds = s.credentials()
 	// Persist any updated registry token.
 	if credsStore != nil && creds.RegistryToken != "" {
-		_ = credsStore.Save(ctx, core, creds)
+		if err := credsStore.Save(ctx, core, creds); err != nil {
+			c.log.Warn("save registry credentials failed", "error", err)
+		}
 	}
 
 	// Subscribe.
@@ -112,7 +120,7 @@ func (c *Client) SubscribeZones(ctx context.Context, core Core, onUpdate func(Zo
 				zonesByID[z.ZoneID] = mapZone(z)
 			}
 		case "Unsubscribed":
-			zonesByID = map[string]Zone{}
+			return errors.New("roon: zone subscription ended")
 		default:
 			// Could be an error; bubble it up.
 			if f.ResponseName != "Success" {
@@ -134,7 +142,11 @@ func (c *Client) SubscribeZones(ctx context.Context, core Core, onUpdate func(Zo
 	}
 
 	// Block until canceled.
-	<-ctx.Done()
+	select {
+	case <-ctx.Done():
+	case <-s.conn.closed:
+		return errors.New("roon: zone subscription disconnected")
+	}
 	if errors.Is(ctx.Err(), context.Canceled) {
 		return nil
 	}
@@ -142,12 +154,17 @@ func (c *Client) SubscribeZones(ctx context.Context, core Core, onUpdate func(Zo
 }
 
 func (c *Client) GetZones(ctx context.Context, core Core) ([]Zone, error) {
-	credsStore, _ := NewFileCredentialStore("roon-cover")
+	credsStore, err := c.credentialStore()
+	if err != nil {
+		return nil, err
+	}
 	var creds Credentials
 	if credsStore != nil {
-		if loaded, ok, err := credsStore.Load(ctx, core); err == nil && ok {
-			creds = loaded
+		loaded, _, loadErr := credsStore.Load(ctx, core)
+		if loadErr != nil {
+			return nil, loadErr
 		}
+		creds = loaded
 	}
 
 	s, err := c.connectAndRegister(ctx, core, &creds)
@@ -156,9 +173,12 @@ func (c *Client) GetZones(ctx context.Context, core Core) ([]Zone, error) {
 	}
 	defer s.conn.Close()
 
+	creds = s.credentials()
 	// Persist any updated registry token.
 	if credsStore != nil && creds.RegistryToken != "" {
-		_ = credsStore.Save(ctx, core, creds)
+		if err := credsStore.Save(ctx, core, creds); err != nil {
+			c.log.Warn("save registry credentials failed", "error", err)
+		}
 	}
 
 	type resp struct {

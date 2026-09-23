@@ -47,12 +47,11 @@ type registryRegistered struct {
 }
 
 type session struct {
+	mu   sync.Mutex
 	core Core
 	conn *mooConn
 
-	log *slog.Logger
-
-	pairedCh     chan CoreID // deprecated; replaced by pairedSignal (kept temporarily)
+	log          *slog.Logger
 	pairedSignal chan struct{}
 	pairedOnce   sync.Once
 	creds        *Credentials
@@ -63,6 +62,8 @@ func (c *Client) connectAndRegister(ctx context.Context, core Core, creds *Crede
 		return nil, errors.New("roon: core missing host/port (did discovery run?)")
 	}
 
+	initial := *creds
+	creds = &initial
 	log := c.log
 	if log == nil {
 		log = slog.Default()
@@ -78,7 +79,6 @@ func (c *Client) connectAndRegister(ctx context.Context, core Core, creds *Crede
 		core:         core,
 		conn:         conn,
 		log:          log,
-		pairedCh:     make(chan CoreID, 1),
 		pairedSignal: make(chan struct{}),
 		creds:        creds,
 	}
@@ -106,7 +106,9 @@ func (c *Client) connectAndRegister(ctx context.Context, core Core, creds *Crede
 
 	if info.CoreID != "" && core.ID == "" {
 		core.ID = CoreID(info.CoreID)
+		s.mu.Lock()
 		s.core.ID = core.ID
+		s.mu.Unlock()
 	}
 
 	// 2) registry register (with optional token)
@@ -146,6 +148,7 @@ func (c *Client) connectAndRegister(ctx context.Context, core Core, creds *Crede
 		return nil, err
 	}
 
+	s.mu.Lock()
 	if reg.Token != "" {
 		creds.RegistryToken = reg.Token
 	}
@@ -155,5 +158,8 @@ func (c *Client) connectAndRegister(ctx context.Context, core Core, creds *Crede
 	creds.CoreKey = coreKey(s.core)
 	log.Debug("registered", "core_id", s.core.ID, "has_token", creds.RegistryToken != "")
 
+	s.mu.Unlock()
 	return s, nil
 }
+
+func (s *session) credentials() Credentials { s.mu.Lock(); defer s.mu.Unlock(); return *s.creds }

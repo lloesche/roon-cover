@@ -13,6 +13,8 @@ import (
 
 type mooVerb string
 
+const maxMooFrameBytes = 8 << 20
+
 const (
 	mooVerbRequest  mooVerb = "REQUEST"
 	mooVerbContinue mooVerb = "CONTINUE"
@@ -40,6 +42,9 @@ type mooFrame struct {
 }
 
 func parseMooFrame(buf []byte) (*mooFrame, error) {
+	if len(buf) > maxMooFrameBytes {
+		return nil, errors.New("moo: frame exceeds 8 MiB")
+	}
 	if len(buf) == 0 {
 		return nil, errors.New("moo: empty frame")
 	}
@@ -106,7 +111,7 @@ func parseMooFrame(buf []byte) (*mooFrame, error) {
 			m.ContentType = v
 		case "content-length":
 			n, err := strconv.Atoi(v)
-			if err != nil || n < 0 {
+			if err != nil || n < 0 || n > len(buf) || n > maxMooFrameBytes {
 				return nil, errors.New("moo: bad content-length")
 			}
 			m.ContentLength = n

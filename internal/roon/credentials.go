@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sync"
 	"time"
 )
 
@@ -28,6 +29,8 @@ type CredentialStore interface {
 	Load(ctx context.Context, core Core) (creds Credentials, ok bool, err error)
 	Save(ctx context.Context, core Core, creds Credentials) error
 }
+
+var credentialFileMu sync.Mutex
 
 type fileCredentialStore struct {
 	path string
@@ -55,7 +58,11 @@ func NewFileCredentialStore(appName string) (CredentialStore, error) {
 }
 
 func (s *fileCredentialStore) Load(ctx context.Context, core Core) (Credentials, bool, error) {
-	_ = ctx
+	if err := ctx.Err(); err != nil {
+		return Credentials{}, false, err
+	}
+	credentialFileMu.Lock()
+	defer credentialFileMu.Unlock()
 
 	key := coreKey(core)
 	if key == "" {
@@ -72,7 +79,11 @@ func (s *fileCredentialStore) Load(ctx context.Context, core Core) (Credentials,
 }
 
 func (s *fileCredentialStore) Save(ctx context.Context, core Core, creds Credentials) error {
-	_ = ctx
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	credentialFileMu.Lock()
+	defer credentialFileMu.Unlock()
 
 	key := coreKey(core)
 	if key == "" {
@@ -130,14 +141,22 @@ func (s *fileCredentialStore) writeAll(m map[string]Credentials) error {
 		return fmt.Errorf("roon: credential store: encode: %w", err)
 	}
 
-	tmp := s.path + ".tmp"
-	if err := os.WriteFile(tmp, b, 0o600); err != nil {
-		return fmt.Errorf("roon: credential store: write tmp: %w", err)
+	tmp, err := os.CreateTemp(filepath.Dir(s.path), ".credentials-*")
+	if err != nil {
+		return err
 	}
-
-	if err := os.Rename(tmp, s.path); err != nil {
-		return fmt.Errorf("roon: credential store: rename: %w", err)
+	name := tmp.Name()
+	defer os.Remove(name)
+	if _, err = tmp.Write(b); err != nil {
+		tmp.Close()
+		return err
 	}
-
-	return nil
+	if err = tmp.Sync(); err != nil {
+		tmp.Close()
+		return err
+	}
+	if err = tmp.Close(); err != nil {
+		return err
+	}
+	return os.Rename(name, s.path)
 }

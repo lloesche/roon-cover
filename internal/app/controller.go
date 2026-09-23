@@ -118,25 +118,8 @@ func (c *Controller) Run(ctx context.Context, scenes chan display.Update, info <
 	}
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
-	updates := make(chan []roon.Zone, 1)
-	subscriptionErrors := make(chan error, 1)
-	go func() {
-		subscriptionErrors <- c.Source.SubscribeZones(ctx, c.Core, func(u roon.ZoneUpdate) error {
-			select {
-			case updates <- u.Zones:
-			default:
-				select {
-				case <-updates:
-				default:
-				}
-				select {
-				case updates <- u.Zones:
-				default:
-				}
-			}
-			return nil
-		})
-	}()
+	updates := make(chan subscriptionEvent, 1)
+	go c.subscribe(ctx, updates)
 	power := make(chan bool, 1)
 	go c.runPower(ctx, power)
 	jobs := make(chan artworkRequest, 1)
@@ -150,6 +133,7 @@ func (c *Controller) Run(ctx context.Context, scenes chan display.Update, info <
 			fetchCancel()
 		}
 	}()
+	connected := true
 	fetching := false
 	retry := time.Second
 	tick := time.NewTicker(100 * time.Millisecond)
@@ -159,10 +143,13 @@ func (c *Controller) Run(ctx context.Context, scenes chan display.Update, info <
 		select {
 		case <-ctx.Done():
 			return nil
-		case err := <-subscriptionErrors:
-			return err
-		case zs := <-updates:
-			c.replace(zs)
+		case update := <-updates:
+			connected = update.err == nil
+			if connected {
+				c.replace(update.zones)
+			} else {
+				c.Log.Warn("zone subscription lost; reconnecting", "error", update.err)
+			}
 			dirty = true
 		case event, ok := <-events:
 			if !ok {
@@ -199,7 +186,7 @@ func (c *Controller) Run(ctx context.Context, scenes chan display.Update, info <
 		case <-tick.C:
 		}
 		z := c.selected()
-		if z.State == roon.ZoneStatePlaying {
+		if connected && z.State == roon.ZoneStatePlaying {
 			idleSince = time.Time{}
 			publishPower(power, false)
 		} else if idleSince.IsZero() {
@@ -210,7 +197,7 @@ func (c *Controller) Run(ctx context.Context, scenes chan display.Update, info <
 		}
 		key := ""
 		var imageKey roon.ImageKey
-		if c.size > 0 && z.State == roon.ZoneStatePlaying && z.NowPlaying != nil && z.NowPlaying.ImageKey != "" {
+		if connected && c.size > 0 && z.State == roon.ZoneStatePlaying && z.NowPlaying != nil && z.NowPlaying.ImageKey != "" {
 			imageKey = z.NowPlaying.ImageKey
 			key = fmt.Sprintf("%s/%d", imageKey, c.size)
 		}
@@ -237,7 +224,11 @@ func (c *Controller) Run(ctx context.Context, scenes chan display.Update, info <
 			fetching = true
 		}
 		if dirty && c.size > 0 {
-			display.Publish(scenes, c.scene())
+			scene := c.scene()
+			if !connected {
+				scene = display.Update{Zone: z.Name}
+			}
+			display.Publish(scenes, scene)
 		}
 	}
 }
