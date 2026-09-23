@@ -7,9 +7,13 @@ import (
 	"os"
 	"os/signal"
 	"syscall"
+
+	"github.com/spf13/cobra"
 )
 
 func Execute() int {
+	// Explorer launches are valid: the default command opens the cover display.
+	cobra.MousetrapHelpText = ""
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
