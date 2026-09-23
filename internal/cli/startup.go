@@ -47,7 +47,7 @@ func presentStartupAttempt(ctx context.Context, show func(display.Status), attem
 			case <-ctx.Done():
 			}
 		}
-		report(display.Status{Title: "Looking for Roon…", Hold: 500 * time.Millisecond})
+		report(display.Status{Title: "Looking for Roon…", Hold: 300 * time.Millisecond})
 		err := attempt(report)
 		close(phases)
 		done <- err

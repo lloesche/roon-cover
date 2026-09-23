@@ -98,7 +98,7 @@ func TestStartupPhasesAreOrderedAndNetworkRunsAhead(t *testing.T) {
 		start := time.Now()
 		workDone := make(chan struct{})
 		want := []string{"Looking for Roon…", "found blackhole", "Connecting to blackhole…", "connected", "Choosing listening zone…", "Dialysis", ""}
-		at := []time.Duration{0, time.Second, 2500 * time.Millisecond, 3500 * time.Millisecond, 5 * time.Second, 6 * time.Second, 8500 * time.Millisecond}
+		at := []time.Duration{0, 800 * time.Millisecond, 2 * time.Second, 2800 * time.Millisecond, 4 * time.Second, 4800 * time.Millisecond, 7300 * time.Millisecond}
 		index := 0
 		err := presentStartupAttempt(context.Background(), func(s display.Status) {
 			if index >= len(want) || s.Title != want[index] || time.Since(start) != at[index] {
@@ -126,7 +126,7 @@ func TestStartupPhasesAreOrderedAndNetworkRunsAhead(t *testing.T) {
 			index++
 			go func() { time.Sleep(500 * time.Millisecond); s.Settled <- struct{}{} }()
 		}, func(report func(display.Status)) error {
-			holds := []time.Duration{time.Second, 500 * time.Millisecond, time.Second, 500 * time.Millisecond, 2 * time.Second}
+			holds := []time.Duration{700 * time.Millisecond, 300 * time.Millisecond, 700 * time.Millisecond, 300 * time.Millisecond, 2 * time.Second}
 			for i, title := range want[1:6] {
 				report(display.Status{Title: title, Hold: holds[i], AppendInline: i%2 == 0})
 			}
@@ -136,7 +136,7 @@ func TestStartupPhasesAreOrderedAndNetworkRunsAhead(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if index != len(want) || time.Since(start) != 9*time.Second {
+		if index != len(want) || time.Since(start) != 7800*time.Millisecond {
 			t.Fatal("hold times must follow completed fades")
 		}
 	})

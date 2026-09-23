@@ -21,8 +21,8 @@ func ensureCoreAndPaired(ctx context.Context, cmd *cobra.Command, client *roon.C
 		return roon.Core{}, err
 	}
 	if status != nil {
-		status(display.Status{Title: "found " + core.Name, Hold: time.Second, AppendInline: true})
-		status(display.Status{Title: "Connecting to " + core.Name + "…", Hold: 500 * time.Millisecond})
+		status(display.Status{Title: "found " + core.Name, Hold: 700 * time.Millisecond, AppendInline: true})
+		status(display.Status{Title: "Connecting to " + core.Name + "…", Hold: 300 * time.Millisecond})
 	}
 
 	store, err := roon.NewFileCredentialStore("roon-cover")
