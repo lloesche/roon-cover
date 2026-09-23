@@ -29,16 +29,17 @@ func TestPauseResumeRestoresCompleteScene(t *testing.T) {
 	if err := c.Initialize([]roon.Zone{z}); err != nil {
 		t.Fatal(err)
 	}
-	first := c.scene(context.Background())
+	c.asset = &display.Artwork{Key: "cover/800"}
+	first := c.scene()
 	z.State = roon.ZoneStatePaused
 	c.replace([]roon.Zone{z})
-	if c.scene(context.Background()).Artwork != nil {
+	if c.scene().Artwork != nil {
 		t.Fatal("paused scene must blank")
 	}
 	z.State = roon.ZoneStatePlaying
 	c.replace([]roon.Zone{z})
-	resumed := c.scene(context.Background())
-	if resumed.Artwork != first.Artwork || resumed.NowPlaying.Title != "title" || s.calls != 1 {
+	resumed := c.scene()
+	if resumed.Artwork != first.Artwork || resumed.NowPlaying.Title != "title" || s.calls != 0 {
 		t.Fatal("resume must restore retained artwork and metadata")
 	}
 }
