@@ -5,10 +5,11 @@ import (
 	"fmt"
 	"image"
 	"image/color"
-	"log"
 	"log/slog"
 	"math"
 	"os"
+	"path/filepath"
+	"runtime"
 	"sort"
 	"strings"
 	"unicode/utf8"
@@ -35,9 +36,11 @@ type textEngine struct {
 }
 
 func newTextEngine(path string, size int) (*textEngine, error) {
-	fm := fontscan.NewFontMap(log.Default())
+	fm := fontscan.NewFontMap(fontScanLogger{})
 	if err := fm.UseSystemFonts(""); err != nil {
 		slog.Warn("system font scan failed; using bundled fallback", "error", err)
+	} else {
+		slog.Info("Using installed fonts for song titles and artist names")
 	}
 	if err := fm.AddFont(bytes.NewReader(goregular.TTF), "bundled-go-regular", "roon-fallback"); err != nil {
 		return nil, err
@@ -55,6 +58,31 @@ func newTextEngine(path string, size int) (*textEngine, error) {
 	}
 	fm.SetQuery(fontscan.Query{Families: families})
 	return &textEngine{fonts: fm, size: float64(size)}, nil
+}
+
+// Keep font discovery diagnostics out of ordinary startup output. Handle the
+// directory list before the library quotes it, avoiding nested log escaping.
+type fontScanLogger struct{}
+
+func (fontScanLogger) Printf(format string, args ...interface{}) {
+	if format == "using system font dirs %q" && len(args) == 1 {
+		if dirs, ok := args[0].([]string); ok {
+			seen := make(map[string]bool)
+			for _, dir := range dirs {
+				path := filepath.ToSlash(filepath.Clean(dir))
+				key := path
+				if runtime.GOOS == "windows" {
+					key = strings.ToLower(key)
+				}
+				if !seen[key] {
+					slog.Debug("Looking for fonts", "directory", path)
+					seen[key] = true
+				}
+			}
+			return
+		}
+	}
+	slog.Debug(fmt.Sprintf(format, args...))
 }
 func (t *textEngine) close() {}
 func (t *textEngine) raster(value string, width int, scale float64) (*image.NRGBA, int, error) {
