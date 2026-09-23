@@ -1,27 +1,34 @@
 package display
 
-import "roon-cover/internal/roon"
-
-// Update represents a new frame of data the UI should show.
-// We keep media metadata with the image so we can overlay text later.
+// Update is a complete desired scene. Assets are immutable; nil means blank.
 type Update struct {
-	Zone  string
-	State roon.ZoneState
+	Zone       string
+	NowPlaying *Metadata
+	Artwork    *Artwork
+	NoFade     bool
+}
 
-	NowPlaying *roon.NowPlaying
+type Metadata struct{ Title, Artist, Album string }
+type Artwork struct {
+	Key  string
+	Data []byte
+}
 
-	// ClearCover requests that the renderer clears any current/previous cover and shows a black screen.
-	// This is useful when the zone is not playing (idle/paused/stopped) and we want to avoid showing stale art.
-	ClearCover bool
-
-	// CoverImage contains the raw image bytes returned by Roon's image service (e.g. JPEG/PNG).
-	// If nil, the display should keep showing the last image (for now).
-	CoverImage    []byte
-	CoverMimeType string
-
-	// NoFade requests that the renderer swaps to this cover immediately (even if fade is enabled).
-	// Useful for "same cover, different size" refetches (e.g. after the window reports its real size).
-	NoFade bool
+// Publish replaces an obsolete complete scene. Only the owning producer calls it.
+func Publish(ch chan Update, scene Update) {
+	select {
+	case ch <- scene:
+		return
+	default:
+	}
+	select {
+	case <-ch:
+	default:
+	}
+	select {
+	case ch <- scene:
+	default:
+	}
 }
 
 // ScreenInfo describes the actual SDL render output size and chosen display.

@@ -236,6 +236,7 @@ func (d *SDLDisplay) Run(ctx context.Context, updates <-chan Update) error {
 	// Report initial output size (important for choosing cover fetch size).
 	reportOutputSize()
 
+	var currentArtwork *Artwork
 	var currTex *sdl.Texture
 	var prevTex *sdl.Texture
 	defer func() {
@@ -466,7 +467,8 @@ func (d *SDLDisplay) Run(ctx context.Context, updates <-chan Update) error {
 			coverUpdatedThisUpdate := false
 			textUpdatedThisUpdate := false
 
-			if u.ClearCover {
+			if u.Artwork == nil && currentArtwork != nil {
+				currentArtwork = nil
 				// Clear both textures and stop any in-flight cover fade.
 				if prevTex != nil {
 					prevTex.Destroy()
@@ -480,8 +482,8 @@ func (d *SDLDisplay) Run(ctx context.Context, updates <-chan Update) error {
 				coverUpdatedThisUpdate = true
 			}
 
-			if len(u.CoverImage) > 0 {
-				img, _, err := image.Decode(bytes.NewReader(u.CoverImage))
+			if u.Artwork != nil && u.Artwork != currentArtwork {
+				img, _, err := image.Decode(bytes.NewReader(u.Artwork.Data))
 				if err != nil {
 					// Ignore bad image frames; keep last image.
 					break
@@ -509,6 +511,7 @@ func (d *SDLDisplay) Run(ctx context.Context, updates <-chan Update) error {
 					return err
 				}
 
+				currentArtwork = u.Artwork
 				// Install texture (optionally crossfading).
 				if u.NoFade || fadeDur <= 0 || currTex == nil {
 					if prevTex != nil {
