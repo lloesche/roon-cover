@@ -29,6 +29,17 @@ func SupportedEasingNames() []string {
 	return out
 }
 
+// FadeEasingByName accepts monotonic curves suitable for opacity. Overshoot and
+// bounce remain available as mathematical easing functions, but clipping them
+// into opacity creates flashes and plateaus rather than physical motion.
+func FadeEasingByName(name string) (func(float64) float64, error) {
+	n := normalizeEaseName(name)
+	if n == "out-elastic" || strings.Contains(n, "bounce") {
+		return nil, fmt.Errorf("easing %q is not suitable for opacity; use in-out-sine or another monotonic curve", name)
+	}
+	return EasingByName(name)
+}
+
 func normalizeEaseName(s string) string {
 	s = strings.TrimSpace(strings.ToLower(s))
 	s = strings.ReplaceAll(s, "_", "-")

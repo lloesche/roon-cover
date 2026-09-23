@@ -51,7 +51,7 @@ func (d *Window) Run(ctx context.Context, updates <-chan Update) error {
 	if d.FadeMS < 0 || d.FontFadeMS < 0 {
 		return fmt.Errorf("fade durations must be nonnegative")
 	}
-	ease, err := EasingByName(d.Ease)
+	ease, err := FadeEasingByName(d.Ease)
 	if err != nil {
 		return err
 	}

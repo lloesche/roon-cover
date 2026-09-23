@@ -62,10 +62,8 @@ func runKiosk(cmd *cobra.Command) error {
 	if disp.FadeMS < 0 {
 		return fmt.Errorf("--fade-ms must be >= 0 (got %d)", disp.FadeMS)
 	}
-	if disp.FadeMS > 0 {
-		if _, err := display.EasingByName(disp.Ease); err != nil {
-			return err
-		}
+	if _, err := display.FadeEasingByName(disp.Ease); err != nil {
+		return err
 	}
 
 	if disp.FontSize < 6 || disp.FontSize > 256 {
