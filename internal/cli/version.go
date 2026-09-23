@@ -6,6 +6,9 @@ import (
 	"runtime/debug"
 )
 
+// Set by release builds; local builds retain the development label.
+var buildVersion = "dev"
+
 func newVersionCmd() *cobra.Command {
 	return &cobra.Command{Use: "version", Short: "Print build identity and renderer", RunE: func(cmd *cobra.Command, args []string) error {
 		revision, dirty, toolchain, engine := "unknown", "unknown", "unknown", "unknown"
@@ -25,7 +28,7 @@ func newVersionCmd() *cobra.Command {
 				}
 			}
 		}
-		_, err := fmt.Fprintf(cmd.OutOrStdout(), "roon-cover commit=%s dirty=%s go=%s renderer=Ebitengine/%s text=go-text\n", revision, dirty, toolchain, engine)
+		_, err := fmt.Fprintf(cmd.OutOrStdout(), "roon-cover version=%s commit=%s dirty=%s go=%s renderer=Ebitengine/%s text=go-text\n", buildVersion, revision, dirty, toolchain, engine)
 		return err
 	}}
 }

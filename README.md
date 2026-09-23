@@ -117,6 +117,23 @@ A font path supplied in the file is relative to that file; a command-line or env
 
 Commands have a ten-second timeout, bounded diagnostic output, and process-tree cleanup. Failures retry with backoff. If this process may have put the display to sleep, shutdown attempts to wake it. Blanking on pause happens immediately and independently of this power-saving delay.
 
+## Automated builds and releases
+
+GitHub Actions builds six targets: Windows, macOS, and Linux, each for x86-64 (`amd64`) and ARM64 (`arm64`). Windows downloads are ZIP archives; macOS/Linux downloads are `.tar.gz` archives that preserve executable permissions. Each contains the binary, README, and Inter license.
+
+- Pull requests run tests and compile/package all six targets without uploading artifacts or publishing releases.
+- Pushes and merges to `main` make packages and checksums available under the workflow run's **Artifacts** section for 30 days. They do not create a release.
+- Pushing a version tag such as `v0.0.1` tests/builds all targets and automatically publishes a GitHub Release with six packages, `SHA256SUMS`, and generated release notes. Tags with a prerelease suffix, such as `v0.0.1-rc.1`, create prereleases.
+
+After merging the workflow, release a commit with:
+
+```sh
+git tag v0.0.1
+git push origin v0.0.1
+```
+
+For example, a release includes `roon-cover_v0.0.1_windows_amd64.zip` and `roon-cover_v0.0.1_macos_arm64.tar.gz`. `roon-cover version` reports the tag (or the commit-specific main/PR build label). Packages are unsigned; macOS signing/notarization is not configured. The headless Pi graphics limitations above still apply to Linux ARM64 builds.
+
 ## Development checks
 
 ```sh

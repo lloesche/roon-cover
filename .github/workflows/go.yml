@@ -1,8 +1,39 @@
 name: Go
-on: [push, pull_request]
+on:
+  pull_request:
+  push:
+    branches: [main]
+    tags: ['v[0-9]*']
 permissions:
   contents: read
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 jobs:
+  metadata:
+    runs-on: ubuntu-24.04
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - name: Determine build version
+        id: version
+        shell: bash
+        env:
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          set -euo pipefail
+          if [[ "$GITHUB_REF" == refs/tags/* ]]; then
+            if [[ ! "$GITHUB_REF_NAME" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?(\+[0-9A-Za-z.-]+)?$ ]]; then
+              echo "Expected a version tag such as v0.0.1" >&2
+              exit 1
+            fi
+            version="$GITHUB_REF_NAME"
+          elif [[ "$GITHUB_EVENT_NAME" == pull_request ]]; then
+            version="pr-${PR_NUMBER}-${GITHUB_SHA:0:12}"
+          else
+            version="main-${GITHUB_SHA:0:12}"
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
   desktop:
     strategy:
       fail-fast: false
@@ -44,3 +75,94 @@ jobs:
           ROON_COVER_STARTUP_SMOKE: '1'
           LIBGL_ALWAYS_SOFTWARE: '1'
         run: xvfb-run -a go test ./internal/display -count=1
+  build:
+    name: Build ${{ matrix.target.name }} ${{ matrix.arch }}
+    needs: [metadata, desktop]
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        target:
+          - {os: linux, name: linux}
+          - {os: darwin, name: macos}
+          - {os: windows, name: windows}
+        arch: [amd64, arm64]
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version: '1.25.5'
+          cache-dependency-path: go.sum
+      - name: Build and package
+        shell: bash
+        env:
+          CGO_ENABLED: '0'
+          GOOS: ${{ matrix.target.os }}
+          GOARCH: ${{ matrix.arch }}
+          PLATFORM: ${{ matrix.target.name }}
+          VERSION: ${{ needs.metadata.outputs.version }}
+        run: |
+          set -euo pipefail
+          mkdir -p staging dist
+          binary=roon-cover
+          if [[ "$GOOS" == windows ]]; then binary+=.exe; fi
+          go build -trimpath -ldflags "-s -w -X roon-cover/internal/cli.buildVersion=$VERSION" -o "staging/$binary" ./cmd/roon-cover
+          cp README.md staging/README.md
+          cp internal/display/fonts/LICENSE.txt staging/INTER-LICENSE.txt
+          package="roon-cover_${VERSION}_${PLATFORM}_${GOARCH}"
+          if [[ "$GOOS" == windows ]]; then
+            (cd staging && zip -q "../dist/$package.zip" "$binary" README.md INTER-LICENSE.txt)
+          else
+            chmod 755 "staging/$binary"
+            tar -czf "dist/$package.tar.gz" -C staging "$binary" README.md INTER-LICENSE.txt
+          fi
+          (cd dist && sha256sum -- * > "$package.sha256")
+      - name: Upload downloadable build
+        if: github.event_name == 'push'
+        uses: actions/upload-artifact@v7
+        with:
+          name: roon-cover_${{ needs.metadata.outputs.version }}_${{ matrix.target.name }}_${{ matrix.arch }}
+          path: dist/*
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 30
+  release:
+    name: Publish versioned release
+    needs: [metadata, build]
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          pattern: roon-cover_${{ needs.metadata.outputs.version }}_*
+          path: dist
+          merge-multiple: true
+      - name: Verify and publish release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          VERSION: ${{ needs.metadata.outputs.version }}
+        run: |
+          set -euo pipefail
+          cd dist
+          shopt -s nullglob
+          archives=(*.zip *.tar.gz)
+          checksums=(*.sha256)
+          [[ ${#archives[@]} == 6 && ${#checksums[@]} == 6 ]]
+          cat -- "${checksums[@]}" > SHA256SUMS
+          sha256sum --check SHA256SUMS
+          prerelease=false
+          if [[ "${VERSION%%+*}" == *-* ]]; then prerelease=true; fi
+          if draft=$(gh release view "$VERSION" --json isDraft --jq '.isDraft' 2>/dev/null); then
+            if [[ "$draft" != true ]]; then
+              echo "Release $VERSION is already published; leaving it unchanged."
+              exit 0
+            fi
+          else
+            gh release create "$VERSION" --verify-tag --draft --title "$VERSION" --generate-notes --prerelease="$prerelease"
+          fi
+          gh release upload "$VERSION" "${archives[@]}" SHA256SUMS --clobber
+          gh release edit "$VERSION" --draft=false --prerelease="$prerelease"
