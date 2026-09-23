@@ -104,7 +104,7 @@ func newRootCmd(ctx context.Context) *cobra.Command {
 
 	cmd.PersistentFlags().StringVar(&flags.FontPath, "font", "", "path to a .ttf font file (optional; default is OS-specific)")
 	cmd.PersistentFlags().IntVar(&flags.FontSize, "font-size", 28, "font size in logical pixels for overlays")
-	cmd.PersistentFlags().IntVar(&flags.FontFadeMS, "font-fade-ms", 200, "total text replacement fade duration in ms (0 disables; independent of cover fade)")
+	cmd.PersistentFlags().IntVar(&flags.FontFadeMS, "font-fade-ms", 400, "total text replacement fade duration in ms (0 disables; independent of cover fade)")
 
 	_ = cfg.BindPFlag("log.format", cmd.PersistentFlags().Lookup("log-format"))
 	_ = cfg.BindPFlag("log.level", cmd.PersistentFlags().Lookup("log-level"))
@@ -165,7 +165,7 @@ func initConfig(cfg *viper.Viper, configPath string) error {
 	cfg.SetDefault("display.show_all", false)
 	cfg.SetDefault("display.font", "")
 	cfg.SetDefault("display.font_size", 28)
-	cfg.SetDefault("display.font_fade_ms", 200)
+	cfg.SetDefault("display.font_fade_ms", 400)
 
 	if configPath == "" {
 		return nil

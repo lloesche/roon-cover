@@ -106,7 +106,10 @@ func (c *Controller) scene() display.Update {
 	}
 	np := z.NowPlaying
 	scene.NowPlaying = &display.Metadata{Title: np.Title, Artist: np.Artist, Album: np.Album}
-	if np.ImageKey != "" && c.asset != nil && strings.HasPrefix(c.asset.Key, string(np.ImageKey)+"/") {
+	// Keep the outgoing cover while its replacement downloads. Publishing nil
+	// here would blank the renderer and discard the source of the crossfade.
+	// Paused playback and tracks without artwork still blank immediately.
+	if np.ImageKey != "" {
 		scene.Artwork = c.asset
 	}
 	return scene
