@@ -22,7 +22,7 @@ func runKiosk(cmd *cobra.Command) error {
 	updates := make(chan display.Update, 1)
 	infoCh := make(chan display.ScreenInfo, 1)
 	eventCh := make(chan display.Event, 8)
-	disp := &display.SDLDisplay{
+	disp := &display.Window{
 		Title: "roon-cover",
 	}
 
