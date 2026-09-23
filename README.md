@@ -122,7 +122,7 @@ Commands have a ten-second timeout, bounded diagnostic output, and process-tree 
 GitHub Actions builds six targets: Windows, macOS, and Linux, each for x86-64 (`amd64`) and ARM64 (`arm64`). Windows downloads are ZIP archives; macOS/Linux downloads are `.tar.gz` archives that preserve executable permissions. Each contains the binary, README, and Inter license.
 
 - Pull requests run tests and compile/package all six targets without uploading artifacts or publishing releases.
-- Pushes and merges to `main` make packages and checksums available under the workflow run's **Artifacts** section for 30 days. They do not create a release.
+- Pushes and merges to `main` make packages and checksums available under the workflow run's **Artifacts** section for 90 days. They do not create a release.
 - Pushing a version tag such as `v0.0.1` tests/builds all targets and automatically publishes a GitHub Release with six packages, `SHA256SUMS`, and generated release notes. Tags with a prerelease suffix, such as `v0.0.1-rc.1`, create prereleases.
 
 After merging the workflow, release a commit with:
