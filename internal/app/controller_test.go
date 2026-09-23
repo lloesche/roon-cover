@@ -60,6 +60,44 @@ func TestZoneRemovalAndOrdering(t *testing.T) {
 	}
 }
 
+func TestStartupPrefersPlayingZoneOnlyOnce(t *testing.T) {
+	zones := []roon.Zone{
+		{ID: "c", Name: "C", State: roon.ZoneStatePlaying},
+		{ID: "a", Name: "A", State: roon.ZoneStatePaused},
+		{ID: "b", Name: "B", State: roon.ZoneStatePlaying},
+	}
+	c := Controller{}
+	if err := c.Initialize(zones); err != nil {
+		t.Fatal(err)
+	}
+	if c.active != "b" {
+		t.Fatal("startup must select the first playing zone in name order")
+	}
+	zones[1].State = roon.ZoneStatePlaying
+	zones[2].State = roon.ZoneStatePaused
+	c.replace(zones)
+	if c.active != "b" {
+		t.Fatal("playback changes must not switch zones after startup")
+	}
+	c = Controller{Options: Options{Zone: "B"}}
+	if err := c.Initialize(zones); err != nil {
+		t.Fatal(err)
+	}
+	if c.active != "b" {
+		t.Fatal("explicit zone must take precedence even when paused")
+	}
+	for i := range zones {
+		zones[i].State = roon.ZoneStatePaused
+	}
+	c = Controller{}
+	if err := c.Initialize(zones); err != nil {
+		t.Fatal(err)
+	}
+	if c.active != "a" {
+		t.Fatal("idle startup must fall back to the first zone in name order")
+	}
+}
+
 func TestCoverReplacementKeepsFadeSourceWhileLoading(t *testing.T) {
 	c := Controller{}
 	z := roon.Zone{ID: "a", Name: "A", State: roon.ZoneStatePlaying, NowPlaying: &roon.NowPlaying{ImageKey: "old", Title: "Old title"}}

@@ -12,7 +12,7 @@ From the repository root on Windows, macOS, or Linux:
 go run ./cmd/roon-cover --window --show-all
 ```
 
-The first zone in name order is selected when `--roon-zone` is omitted. Left/Right cycle zones; Q or Escape quits. Selection survives updates, and removing the selected zone selects the next available default. Pausing blanks artwork and metadata immediately. `--show-zone` displays the zone label briefly at the top.
+When `--roon-zone` is omitted, startup selects the first playing zone in name order; if none is playing, it selects the first available zone in name order. This preference applies only at startup: playback changes never switch the selected zone. Left/Right cycle zones; Q or Escape quits. Selection survives updates, and removing the selected zone selects the first remaining zone in name order. Pausing blanks artwork and metadata immediately. `--show-zone` displays the zone label briefly at the top.
 
 To watch a particular zone:
 

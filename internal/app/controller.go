@@ -50,6 +50,14 @@ func (c *Controller) Initialize(zones []roon.Zone) error {
 		}
 		return fmt.Errorf("unknown zone %q", name)
 	}
+	// Prefer active playback only at startup. Subsequent updates preserve the
+	// selected zone, even when another zone starts playing or this one pauses.
+	for _, z := range c.zones {
+		if z.State == roon.ZoneStatePlaying {
+			c.active = z.ID
+			break
+		}
+	}
 	return nil
 }
 func ordered(zones []roon.Zone) []roon.Zone {
