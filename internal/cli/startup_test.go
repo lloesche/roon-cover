@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"roon-cover/internal/display"
@@ -16,7 +17,7 @@ func TestStartupRetriesWithoutInputAndShowsPairing(t *testing.T) {
 	done := make(chan error, 1)
 	attempts := 0
 	go func() {
-		done <- runStartup(ctx, scenes, 30*time.Millisecond, func(status func(display.Status)) error {
+		done <- runStartup(ctx, scenes, 30*time.Millisecond, 0, func(status func(display.Status)) error {
 			attempts++
 			if attempts == 1 {
 				return errors.New("server unavailable")
@@ -58,7 +59,7 @@ func TestStartupCancellationDoesNotWaitForRetry(t *testing.T) {
 	scenes := make(chan display.Update, 1)
 	done := make(chan error, 1)
 	go func() {
-		done <- runStartup(ctx, scenes, time.Hour, func(func(display.Status)) error { return errors.New("offline") })
+		done <- runStartup(ctx, scenes, time.Hour, 0, func(func(display.Status)) error { return errors.New("offline") })
 	}()
 	for {
 		select {
@@ -84,4 +85,61 @@ func TestConsolePairCommandRemoved(t *testing.T) {
 			t.Fatal("console pairing is still registered")
 		}
 	}
+}
+
+func TestStartupPhasesAreOrderedAndNetworkRunsAhead(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		start := time.Now()
+		workDone := make(chan struct{})
+		var titles []string
+		err := presentStartupAttempt(context.Background(), func(s display.Status) {
+			if got := time.Since(start); got != time.Duration(len(titles))*time.Second {
+				t.Fatalf("phase %q shown at %v", s.Title, got)
+			}
+			if len(titles) > 0 {
+				select {
+				case <-workDone:
+				default:
+					t.Fatal("presentation delayed connection work")
+				}
+			}
+			titles = append(titles, s.Title)
+		}, time.Second, func(report func(display.Status)) error {
+			for _, title := range []string{"Found", "Connected", "Using Dialysis"} {
+				report(display.Status{Title: title})
+			}
+			close(workDone)
+			return nil
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		want := []string{"Looking for Roon…", "Found", "Connected", "Using Dialysis"}
+		if len(titles) != len(want) {
+			t.Fatal(titles)
+		}
+		for i := range want {
+			if titles[i] != want[i] {
+				t.Fatal(titles)
+			}
+		}
+		if time.Since(start) != 5*time.Second {
+			t.Fatal("final zone announcement must last two seconds")
+		}
+	})
+}
+
+func TestStartupPhaseWaitCancelsPromptly(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+		defer cancel()
+		start := time.Now()
+		err := presentStartupAttempt(ctx, func(display.Status) {}, time.Second, func(func(display.Status)) error {
+			<-ctx.Done()
+			return ctx.Err()
+		})
+		if !errors.Is(err, context.DeadlineExceeded) || time.Since(start) != 100*time.Millisecond {
+			t.Fatalf("cancellation delayed: %v, %v", err, time.Since(start))
+		}
+	})
 }

@@ -71,7 +71,7 @@ func ordered(zones []roon.Zone) []roon.Zone {
 	})
 	return out
 }
-func (c *Controller) selected() roon.Zone {
+func (c *Controller) SelectedZone() roon.Zone {
 	for _, z := range c.zones {
 		if z.ID == c.active {
 			return z
@@ -81,7 +81,7 @@ func (c *Controller) selected() roon.Zone {
 }
 func (c *Controller) replace(zones []roon.Zone) {
 	c.zones = ordered(zones)
-	if c.selected().ID != "" {
+	if c.SelectedZone().ID != "" {
 		return
 	}
 	c.active = ""
@@ -110,7 +110,7 @@ func (c *Controller) cycle(kind display.EventKind) {
 // scene never performs I/O. Loading is a transition within playback, not a
 // request to blank: retain the last complete scene until playback resumes.
 func (c *Controller) scene() display.Update {
-	z := c.selected()
+	z := c.SelectedZone()
 	scene := display.Update{Zone: z.Name}
 	if z.State == roon.ZoneStateLoading && z.ID == c.sceneZone {
 		scene = c.lastScene
@@ -213,7 +213,7 @@ func (c *Controller) Run(ctx context.Context, scenes chan display.Update, info <
 			}
 		case <-tick.C:
 		}
-		z := c.selected()
+		z := c.SelectedZone()
 		if connected && (z.State == roon.ZoneStatePlaying || z.State == roon.ZoneStateLoading) {
 			idleSince = time.Time{}
 			publishPower(power, false)

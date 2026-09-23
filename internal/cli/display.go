@@ -72,18 +72,19 @@ func runKiosk(cmd *cobra.Command) error {
 	done := make(chan error, 1)
 	go func() {
 		defer close(updates)
-		done <- runStartup(ctx, updates, 5*time.Second, func(status func(display.Status)) error {
+		var controller *app.Controller
+		err := runStartup(ctx, updates, 5*time.Second, time.Second, func(status func(display.Status)) error {
 			client := roon.NewClient(roon.Config{DisplayName: "roon-cover"}, roon.WithLogger(l))
 			core, err := ensureCoreAndPaired(ctx, cmd, client, status)
 			if err != nil {
 				return err
 			}
-			status(display.Status{Title: "Connected to " + core.Name, Detail: "Loading your listening zones…"})
 			zones, err := client.GetZones(ctx, core)
 			if err != nil {
 				return err
 			}
-			controller := app.Controller{Source: client, Core: core, Log: l, Options: app.Options{Zone: configFor(cmd).GetString("roon.zone"), SleepAfter: time.Duration(sleepIdleSec) * time.Second}, Power: func(ctx context.Context, sleep bool) error {
+			status(display.Status{Title: "Connected to " + core.Name, Detail: "Choosing your listening zone…"})
+			controller = &app.Controller{Source: client, Core: core, Log: l, Options: app.Options{Zone: configFor(cmd).GetString("roon.zone"), SleepAfter: time.Duration(sleepIdleSec) * time.Second}, Power: func(ctx context.Context, sleep bool) error {
 				if sleep {
 					return powerCtl.Sleep(ctx)
 				}
@@ -95,11 +96,26 @@ func runKiosk(cmd *cobra.Command) error {
 			if err := controller.Initialize(zones); err != nil {
 				return err
 			}
-			// Replace the startup screen even if playback is paused or there are
-			// no subscription changes yet. Layout's first size is buffered.
-			display.Publish(updates, display.Update{})
-			return controller.Run(ctx, updates, infoCh, eventCh)
+			zone := controller.SelectedZone()
+			message := display.Status{Title: "Using " + zone.Name, Detail: "No zone specified. Using a playing zone."}
+			if controller.Options.Zone != "" {
+				message.Detail = "Using your configured zone."
+			} else if zone.State != roon.ZoneStatePlaying {
+				message.Detail = "No zone specified. Using the first available zone."
+			}
+			if zone.State == roon.ZoneStatePlaying {
+				message.Hint = "Displaying now playing…"
+			} else {
+				message.Hint = "The screen will stay blank until playback starts."
+			}
+			status(message)
+			return nil
 		})
+		if err == nil && ctx.Err() == nil {
+			display.Publish(updates, display.Update{})
+			err = controller.Run(ctx, updates, infoCh, eventCh)
+		}
+		done <- err
 	}()
 	renderErr := disp.Run(ctx, updates)
 	cancel()

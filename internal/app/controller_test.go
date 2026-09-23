@@ -55,7 +55,7 @@ func TestZoneRemovalAndOrdering(t *testing.T) {
 		t.Fatal(c.active)
 	}
 	c.replace(nil)
-	if c.selected().ID != "" {
+	if c.SelectedZone().ID != "" {
 		t.Fatal("removed zone retained")
 	}
 }
