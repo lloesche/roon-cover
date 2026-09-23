@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -33,11 +34,36 @@ func (c CommandController) run(ctx context.Context, command string) error {
 	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 	cmd := shellCommand(ctx, command)
-	if err := cmd.Run(); err != nil {
+	output := &boundedOutput{}
+	cmd.Stdout = output
+	cmd.Stderr = output
+	cmd.WaitDelay = time.Second
+	if err := runShell(cmd); err != nil {
 		if ctx.Err() != nil {
 			return fmt.Errorf("display power command: %w", ctx.Err())
 		}
-		return fmt.Errorf("display power command: %w", err)
+		return fmt.Errorf("display power command: %w; output: %s", err, output.String())
 	}
 	return nil
+}
+
+type boundedOutput struct {
+	mu   sync.Mutex
+	data []byte
+}
+
+func (b *boundedOutput) Write(p []byte) (int, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	n := len(p)
+	remaining := 4096 - len(b.data)
+	if remaining > 0 {
+		b.data = append(b.data, p[:min(remaining, n)]...)
+	}
+	return n, nil
+}
+func (b *boundedOutput) String() string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return strings.TrimSpace(string(b.data))
 }

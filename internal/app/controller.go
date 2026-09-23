@@ -121,7 +121,9 @@ func (c *Controller) Run(ctx context.Context, scenes chan display.Update, info <
 	updates := make(chan subscriptionEvent, 1)
 	go c.subscribe(ctx, updates)
 	power := make(chan bool, 1)
-	go c.runPower(ctx, power)
+	powerDone := make(chan struct{})
+	go func() { defer close(powerDone); c.runPower(ctx, power) }()
+	defer func() { cancel(); <-powerDone }()
 	jobs := make(chan artworkRequest, 1)
 	results := make(chan artworkResult, 1)
 	go c.loadArtwork(ctx, jobs, results)
@@ -246,23 +248,5 @@ func publishPower(ch chan bool, sleep bool) {
 	select {
 	case ch <- sleep:
 	default:
-	}
-}
-func (c *Controller) runPower(ctx context.Context, desired <-chan bool) {
-	current := false
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case sleep := <-desired:
-			if c.Power == nil || c.Options.SleepAfter <= 0 || sleep == current {
-				continue
-			}
-			if err := c.Power(ctx, sleep); err != nil {
-				c.Log.Warn("display power command failed", "err", err)
-			} else {
-				current = sleep
-			}
-		}
 	}
 }
