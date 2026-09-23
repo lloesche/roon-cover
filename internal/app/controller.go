@@ -131,7 +131,6 @@ func (c *Controller) scene() display.Update {
 	return scene
 }
 func (c *Controller) Run(ctx context.Context, scenes chan display.Update, info <-chan display.ScreenInfo, events <-chan display.Event) error {
-	defer close(scenes)
 	if c.Log == nil {
 		c.Log = slog.Default()
 	}
@@ -247,8 +246,8 @@ func (c *Controller) Run(ctx context.Context, scenes chan display.Update, info <
 		if dirty && c.size > 0 {
 			scene := c.scene()
 			if !connected {
-				scene = display.Update{Zone: z.Name}
-				c.lastScene, c.sceneZone = scene, ""
+				scene = display.Update{Zone: z.Name, Status: &display.Status{Title: "Connection to Roon lost", Detail: "Waiting for your Roon Server…", Hint: "Reconnecting automatically."}, NoFade: true}
+				c.lastScene, c.sceneZone = display.Update{}, ""
 			}
 			display.Publish(scenes, scene)
 		}

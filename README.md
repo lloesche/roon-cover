@@ -62,14 +62,15 @@ Linux ARM64 compilation is checked, but that does not validate the Pi graphics d
 
 ## Roon connection
 
-Authorize the extension in Roon on first use. Credentials are stored under the OS user configuration directory in `roon-cover/credentials.json`; do not commit that file.
+The display opens while it discovers and connects to Roon. On first use, it shows instructions to enable roon-cover in **Roon → Settings → Extensions** from your phone, tablet, or computer. Once approved, the kiosk proceeds automatically. No buttons, keyboard, or mouse are needed on the kiosk; connection failures show a message and retry automatically every five seconds. Credentials are stored under the OS user configuration directory in `roon-cover/credentials.json`; do not commit that file.
 
 ```sh
 go run ./cmd/roon-cover roon discover
-go run ./cmd/roon-cover roon pair --roon-core "My Core"
 go run ./cmd/roon-cover roon zones
 go run ./cmd/roon-cover --roon-core 192.168.1.10:9330 --window
 ```
+
+The former `roon pair` console command has been removed. Pairing takes place through the display startup flow. The `roon zones` diagnostic requires an existing pairing and never prompts for console pairing.
 
 `--roon-core` accepts a discovered name or an explicit `host:port` to bypass discovery. Use your Core's actual HTTP/API port; the example port is not a universal default. IPv6 addresses use `[address]:port`.
 

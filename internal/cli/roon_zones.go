@@ -22,7 +22,7 @@ func newRoonZonesCmd() *cobra.Command {
 			}, roon.WithLogger(l))
 
 			// Resolve core (configured vs discovery) and ensure we're paired.
-			core, err := ensureCoreAndPaired(cmd, client)
+			core, err := ensureCoreAndPaired(cmd.Context(), cmd, client, nil)
 			if err != nil {
 				return err
 			}

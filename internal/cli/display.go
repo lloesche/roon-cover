@@ -69,29 +69,38 @@ func runKiosk(cmd *cobra.Command) error {
 		return fmt.Errorf("--font-size must be in [6,256] (got %d)", disp.FontSize)
 	}
 
-	client := roon.NewClient(roon.Config{DisplayName: "roon-cover"}, roon.WithLogger(l))
-	core, err := ensureCoreAndPaired(cmd, client)
-	if err != nil {
-		return err
-	}
-	zones, err := client.GetZones(ctx, core)
-	if err != nil {
-		return err
-	}
-	controller := app.Controller{Source: client, Core: core, Log: l, Options: app.Options{Zone: configFor(cmd).GetString("roon.zone"), SleepAfter: time.Duration(sleepIdleSec) * time.Second}, Power: func(ctx context.Context, sleep bool) error {
-		if sleep {
-			return powerCtl.Sleep(ctx)
-		}
-		return powerCtl.Wake(ctx)
-	}}
-	if configFor(cmd).GetBool("download.to_temp") {
-		controller.Options.SaveArtwork = func(zone string, data []byte, mime string) { writeCoverBytesToTemp(l, zone, data, mime) }
-	}
-	if err := controller.Initialize(zones); err != nil {
-		return err
-	}
 	done := make(chan error, 1)
-	go func() { done <- controller.Run(ctx, updates, infoCh, eventCh) }()
+	go func() {
+		defer close(updates)
+		done <- runStartup(ctx, updates, 5*time.Second, func(status func(display.Status)) error {
+			client := roon.NewClient(roon.Config{DisplayName: "roon-cover"}, roon.WithLogger(l))
+			core, err := ensureCoreAndPaired(ctx, cmd, client, status)
+			if err != nil {
+				return err
+			}
+			status(display.Status{Title: "Connected to " + core.Name, Detail: "Loading your listening zones…"})
+			zones, err := client.GetZones(ctx, core)
+			if err != nil {
+				return err
+			}
+			controller := app.Controller{Source: client, Core: core, Log: l, Options: app.Options{Zone: configFor(cmd).GetString("roon.zone"), SleepAfter: time.Duration(sleepIdleSec) * time.Second}, Power: func(ctx context.Context, sleep bool) error {
+				if sleep {
+					return powerCtl.Sleep(ctx)
+				}
+				return powerCtl.Wake(ctx)
+			}}
+			if configFor(cmd).GetBool("download.to_temp") {
+				controller.Options.SaveArtwork = func(zone string, data []byte, mime string) { writeCoverBytesToTemp(l, zone, data, mime) }
+			}
+			if err := controller.Initialize(zones); err != nil {
+				return err
+			}
+			// Replace the startup screen even if playback is paused or there are
+			// no subscription changes yet. Layout's first size is buffered.
+			display.Publish(updates, display.Update{})
+			return controller.Run(ctx, updates, infoCh, eventCh)
+		})
+	}()
 	renderErr := disp.Run(ctx, updates)
 	cancel()
 	controllerErr := <-done

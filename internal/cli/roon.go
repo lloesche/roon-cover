@@ -7,11 +7,10 @@ import (
 func newRoonCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "roon",
-		Short: "Roon extension operations (discovery, pairing, zones)",
+		Short: "Roon diagnostics (discovery and zones)",
 	}
 
 	cmd.AddCommand(newRoonDiscoverCmd())
-	cmd.AddCommand(newRoonPairCmd())
 	cmd.AddCommand(newRoonZonesCmd())
 	return cmd
 }

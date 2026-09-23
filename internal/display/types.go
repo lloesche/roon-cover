@@ -8,6 +8,12 @@ type Update struct {
 	NowPlaying *Metadata
 	Artwork    *Artwork
 	NoFade     bool
+	Status     *Status
+}
+
+// Status is a startup screen; it does not depend on metadata overlay flags.
+type Status struct {
+	Title, Detail, Hint string
 }
 
 type Metadata struct{ Title, Artist, Album string }

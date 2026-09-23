@@ -46,6 +46,8 @@ type windowGame struct {
 	timer                  *time.Timer
 	err                    error
 	presented, minimumMode bool
+	status                 *Status
+	statusImage            *ebiten.Image
 }
 
 func (d *Window) Run(ctx context.Context, updates <-chan Update) error {
@@ -102,11 +104,10 @@ func (d *Window) Run(ctx context.Context, updates <-chan Update) error {
 	g := &windowGame{config: d, ctx: localCtx, scenes: scenes, scale: 1, enabled: [4]bool{d.ShowTitle, d.ShowArtist, d.ShowAlbum, d.ShowZone}}
 	g.cover = coverLayer{duration: time.Duration(d.FadeMS) * time.Millisecond, ease: ease, width: 800, height: 800}
 	defer g.close()
-	if d.ShowTitle || d.ShowArtist || d.ShowAlbum || d.ShowZone {
-		g.text, err = newTextEngine(d.FontPath, max(6, d.FontSize))
-		if err != nil {
-			return err
-		}
+	// Startup instructions must be visible even when metadata overlays are off.
+	g.text, err = newTextEngine(d.FontPath, max(6, d.FontSize))
+	if err != nil {
+		return err
 	}
 	for i := range g.lines {
 		g.lines[i].animation = textTransition{duration: g.cover.duration, ease: ease}
@@ -115,6 +116,7 @@ func (d *Window) Run(ctx context.Context, updates <-chan Update) error {
 	return ebiten.RunGame(g)
 }
 func (g *windowGame) close() {
+	g.clearStatusImage()
 	if g.timer != nil {
 		g.timer.Stop()
 	}
@@ -142,6 +144,8 @@ func (g *windowGame) Update() error {
 	g.now = time.Now()
 	select {
 	case scene := <-g.scenes:
+		g.status = scene.Status
+		g.clearStatusImage()
 		g.cover.set(scene.Artwork, scene.NoFade, g.now)
 		values := [4]string{"", "", "", scene.Zone}
 		if scene.NowPlaying != nil {
@@ -156,6 +160,9 @@ func (g *windowGame) Update() error {
 			g.lines[i].animation.set(strings.TrimSpace(value), g.now, scene.NoFade)
 		}
 	default:
+	}
+	if g.status != nil {
+		return nil
 	}
 	for _, key := range []struct {
 		key   ebiten.Key
@@ -202,6 +209,7 @@ func (g *windowGame) Layout(w, h int) (int, int) {
 	scale := ebiten.Monitor().DeviceScaleFactor()
 	width, height := max(1, int(math.Round(float64(w)*scale))), max(1, int(math.Round(float64(h)*scale)))
 	if width != g.width || height != g.height || scale != g.scale {
+		g.clearStatusImage()
 		g.width = width
 		g.height = height
 		g.scale = scale
@@ -223,6 +231,10 @@ func (g *windowGame) Layout(w, h int) (int, int) {
 func (g *windowGame) Draw(screen *ebiten.Image) {
 	defer func() { g.presented = true }()
 	screen.Fill(color.Black)
+	if g.status != nil {
+		g.drawStatus(screen)
+		return
+	}
 	g.cover.draw(screen, g.now)
 	if g.text == nil {
 		return

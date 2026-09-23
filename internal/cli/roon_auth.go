@@ -1,16 +1,17 @@
 package cli
 
 import (
+	"context"
 	"errors"
 	"strings"
 
+	"roon-cover/internal/display"
 	"roon-cover/internal/roon"
 
 	"github.com/spf13/cobra"
 )
 
-func ensureCoreAndPaired(cmd *cobra.Command, client *roon.Client) (roon.Core, error) {
-	ctx := cmd.Context()
+func ensureCoreAndPaired(ctx context.Context, cmd *cobra.Command, client *roon.Client, status func(display.Status)) (roon.Core, error) {
 	l := LoggerFromContext(ctx)
 
 	coreName := strings.TrimSpace(configFor(cmd).GetString("roon.core"))
@@ -39,7 +40,10 @@ func ensureCoreAndPaired(cmd *cobra.Command, client *roon.Client) (roon.Core, er
 		return core, nil
 	}
 
-	l.Info("pairing required; approve the extension in Roon", "core", core.Name)
+	if status == nil {
+		return roon.Core{}, errors.New("Roon is not paired; open roon-cover to complete pairing in its window")
+	}
+	status(display.Status{Title: "Connect to " + core.Name, Detail: "In Roon, open Settings → Extensions", Hint: "Enable roon-cover to continue."})
 	newCreds, err := client.Pair(ctx, core)
 	if err != nil {
 		return roon.Core{}, err
