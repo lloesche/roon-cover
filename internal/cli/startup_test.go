@@ -103,6 +103,9 @@ func TestStartupPhasesAreOrderedAndNetworkRunsAhead(t *testing.T) {
 					t.Fatal("presentation delayed connection work")
 				}
 			}
+			if len(s.Lines) < len(titles)+1 || s.Lines[0] != "Looking for Roon…" {
+				t.Fatal("startup history was replaced instead of appended")
+			}
 			titles = append(titles, s.Title)
 		}, time.Second, func(report func(display.Status)) error {
 			for _, title := range []string{"Found", "Connected", "Using Dialysis"} {

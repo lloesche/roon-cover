@@ -100,3 +100,40 @@ func TestCoverCompositionAndInterruption(t *testing.T) {
 		t.Fatal("pause did not blank immediately")
 	}
 }
+
+func TestStartupLineFadePreservesEarlierText(t *testing.T) {
+	if os.Getenv("ROON_COVER_GPU_TESTS") != "1" {
+		t.Skip("set ROON_COVER_GPU_TESTS=1 for GPU checks")
+	}
+	text, err := newTextEngine("", 28)
+	if err != nil {
+		t.Fatal(err)
+	}
+	g := windowGame{text: text, width: 800, height: 800, scale: 1, cover: coverLayer{duration: time.Second, ease: func(x float64) float64 { return x }}}
+	defer g.close()
+	out := ebiten.NewImage(800, 800)
+	defer out.Deallocate()
+	brightness := func(at time.Time) uint64 {
+		g.now = at
+		g.drawStatus(out)
+		pixels := make([]byte, 800*800*4)
+		out.ReadPixels(pixels)
+		var sum uint64
+		for i := 0; i < len(pixels); i += 4 {
+			sum += uint64(pixels[i])
+		}
+		return sum
+	}
+	now := time.Unix(1, 0)
+	g.setStatus(&Status{Lines: []string{"Looking for Roon…"}}, now)
+	before := brightness(now.Add(time.Second))
+	g.setStatus(&Status{Lines: []string{"Looking for Roon…", "Found blackhole"}}, now.Add(time.Second))
+	if got := brightness(now.Add(time.Second)); got != before {
+		t.Fatal("adding a line moved, faded, or replaced earlier text")
+	}
+	mid := brightness(now.Add(1500 * time.Millisecond))
+	end := brightness(now.Add(2 * time.Second))
+	if !(before < mid && mid < end) {
+		t.Fatal("new text did not fade in gradually")
+	}
+}

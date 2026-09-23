@@ -37,6 +37,7 @@ func runStartup(ctx context.Context, scenes chan display.Update, retryDelay, ste
 func presentStartupAttempt(ctx context.Context, show func(display.Status), step time.Duration, attempt func(func(display.Status)) error) error {
 	phases := make(chan display.Status, 8)
 	done := make(chan error, 1)
+	var transcript []string
 	go func() {
 		report := func(s display.Status) {
 			select {
@@ -62,6 +63,13 @@ func presentStartupAttempt(ctx context.Context, show func(display.Status), step 
 				} // Final zone announcement: two steps.
 				return err
 			}
+			for _, line := range []string{phase.Title, phase.Detail, phase.Hint} {
+				if line != "" {
+					transcript = append(transcript, line)
+				}
+			}
+			// Complete immutable snapshots survive coalescing in the renderer.
+			phase.Lines = append([]string(nil), transcript...)
 			show(phase)
 			waitStartup(ctx, step)
 		}

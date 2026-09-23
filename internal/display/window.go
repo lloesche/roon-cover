@@ -47,7 +47,7 @@ type windowGame struct {
 	err                    error
 	presented, minimumMode bool
 	status                 *Status
-	statusImage            *ebiten.Image
+	statusRows             []statusRow
 }
 
 func (d *Window) Run(ctx context.Context, updates <-chan Update) error {
@@ -116,7 +116,7 @@ func (d *Window) Run(ctx context.Context, updates <-chan Update) error {
 	return ebiten.RunGame(g)
 }
 func (g *windowGame) close() {
-	g.clearStatusImage()
+	g.setStatus(nil, time.Time{})
 	if g.timer != nil {
 		g.timer.Stop()
 	}
@@ -144,8 +144,7 @@ func (g *windowGame) Update() error {
 	g.now = time.Now()
 	select {
 	case scene := <-g.scenes:
-		g.status = scene.Status
-		g.clearStatusImage()
+		g.setStatus(scene.Status, g.now)
 		g.cover.set(scene.Artwork, scene.NoFade, g.now)
 		values := [4]string{"", "", "", scene.Zone}
 		if scene.NowPlaying != nil {
@@ -162,6 +161,7 @@ func (g *windowGame) Update() error {
 	default:
 	}
 	if g.status != nil {
+		g.schedule()
 		return nil
 	}
 	for _, key := range []struct {
@@ -185,6 +185,11 @@ func (g *windowGame) schedule() {
 	delay := time.Duration(0)
 	if g.cover.active(g.now) {
 		delay = time.Second / 60
+	}
+	for _, row := range g.statusRows {
+		if g.now.Sub(row.start) < g.cover.duration {
+			delay = time.Second / 60
+		}
 	}
 	for i := range g.lines {
 		a := &g.lines[i].animation

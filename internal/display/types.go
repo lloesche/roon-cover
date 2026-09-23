@@ -14,6 +14,8 @@ type Update struct {
 // Status is a startup screen; it does not depend on metadata overlay flags.
 type Status struct {
 	Title, Detail, Hint string
+	// Lines is an immutable, cumulative startup transcript when present.
+	Lines []string
 }
 
 type Metadata struct{ Title, Artist, Album string }
