@@ -20,7 +20,6 @@ import (
 	"github.com/go-text/typesetting/font/opentype/tables"
 	"github.com/go-text/typesetting/fontscan"
 	"github.com/go-text/typesetting/shaping"
-	"golang.org/x/image/font/gofont/goregular"
 	"golang.org/x/image/math/fixed"
 	"golang.org/x/text/unicode/bidi"
 )
@@ -38,14 +37,14 @@ type textEngine struct {
 func newTextEngine(path string, size int) (*textEngine, error) {
 	fm := fontscan.NewFontMap(fontScanLogger{})
 	if err := fm.UseSystemFonts(""); err != nil {
-		slog.Warn("system font scan failed; using bundled fallback", "error", err)
+		slog.Warn("System font scan failed; using bundled Inter", "error", err)
 	} else {
-		slog.Info("Using installed fonts for song titles and artist names")
+		slog.Info("Using Inter, with installed fonts for other languages")
 	}
-	if err := fm.AddFont(bytes.NewReader(goregular.TTF), "bundled-go-regular", "roon-fallback"); err != nil {
+	if err := fm.AddFont(bytes.NewReader(interRegular), "bundled-inter-regular", "roon-inter"); err != nil {
 		return nil, err
 	}
-	families := []string{"sans-serif", "roon-fallback"}
+	families := []string{"roon-inter", "sans-serif"}
 	if path != "" {
 		data, err := os.ReadFile(path)
 		if err != nil {

@@ -129,6 +129,7 @@ func newRootCmd(ctx context.Context) *cobra.Command {
 	_ = cfg.BindPFlag("display.font_size", cmd.PersistentFlags().Lookup("font-size"))
 
 	cmd.AddCommand(newVersionCmd())
+	cmd.AddCommand(newLicensesCmd())
 	cmd.AddCommand(newRoonCmd())
 	cmd.AddCommand(newDisplayCmd())
 

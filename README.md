@@ -80,7 +80,9 @@ Dropped zone subscriptions blank the display and retry with a bounded delay. Art
 
 ## Typography and transitions
 
-`--show-title`, `--show-artist`, `--show-album`, `--show-zone`, or `--show-all` enable overlays. `--font` selects a TTF/OTF/TTC file; installed fonts supply fallback. A small bundled font covers basic text if system font discovery fails. For broad coverage on Linux, install Noto fonts, including CJK and emoji packages.
+`--show-title`, `--show-artist`, `--show-album`, `--show-zone`, or `--show-all` enable overlays. Inter Regular 4.1 is embedded as the default font for startup and metadata; no font installation or runtime download is needed. `--font` selects a custom TTF/OTF/TTC file instead. Installed fonts supply fallback for scripts and emoji Inter does not cover. For broad coverage on Linux, install Noto fonts, including CJK and emoji packages.
+
+Inter is distributed unmodified under the [SIL Open Font License](internal/display/fonts/LICENSE.txt), with its copyright and license embedded in the executable. Run `roon-cover licenses` to read them. [Font source and checksum](internal/display/fonts/README.md).
 
 Go-text handles script shaping, bidirectional layout, and cluster-aware ellipsis. Available fonts still determine glyph coverage. Bitmap/SVG and COLRv0 color glyphs are supported; COLRv1 currently falls back to a monochrome outline when available. This is not a guarantee of identical typography or complete font coverage across operating systems.
 
