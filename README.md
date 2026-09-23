@@ -2,7 +2,7 @@
 
 A Roon now-playing display with fullscreen artwork, smooth crossfades, optional multilingual metadata, and keyboard zone selection.
 
-The renderer uses **Ebitengine 2.10** and **go-text**. Desktop builds need Go 1.25 or newer and a working graphics driver. SDL, Pango, Cairo, a C compiler, and the old `-tags sdl` option are no longer required. Dependencies are pinned in `go.mod` and `go.sum`.
+The renderer uses **Ebitengine 2.10** and **go-text**. Desktop builds need Go 1.27.1 or newer and a working graphics driver. SDL, Pango, Cairo, a C compiler, and the old `-tags sdl` option are no longer required. Dependencies are pinned in `go.mod` and `go.sum`.
 
 ## Run from source
 
