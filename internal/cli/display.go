@@ -41,7 +41,6 @@ func runKiosk(cmd *cobra.Command) error {
 	disp.Ease = configFor(cmd).GetString("display.ease")
 	disp.FontPath = configFor(cmd).GetString("display.font")
 	disp.FontSize = configFor(cmd).GetInt("display.font_size")
-	disp.FontFadeMS = configFor(cmd).GetInt("display.font_fade_ms")
 
 	showAll := configFor(cmd).GetBool("display.show_all")
 	disp.ShowTitle = showAll || configFor(cmd).GetBool("display.show_title")
@@ -68,9 +67,6 @@ func runKiosk(cmd *cobra.Command) error {
 
 	if disp.FontSize < 6 || disp.FontSize > 256 {
 		return fmt.Errorf("--font-size must be in [6,256] (got %d)", disp.FontSize)
-	}
-	if disp.FontFadeMS < 0 {
-		return fmt.Errorf("--font-fade-ms must be >= 0 (got %d)", disp.FontFadeMS)
 	}
 
 	client := roon.NewClient(roon.Config{DisplayName: "roon-cover"}, roon.WithLogger(l))

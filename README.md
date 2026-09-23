@@ -82,10 +82,10 @@ Dropped zone subscriptions blank the display and retry with a bounded delay. Art
 Go-text handles script shaping, bidirectional layout, and cluster-aware ellipsis. Available fonts still determine glyph coverage. Bitmap/SVG and COLRv0 color glyphs are supported; COLRv1 currently falls back to a monochrome outline when available. This is not a guarantee of identical typography or complete font coverage across operating systems.
 
 ```sh
-go run ./cmd/roon-cover --show-all --font-size 28 --fade-ms 500 --font-fade-ms 400 --ease in-out-sine
+go run ./cmd/roon-cover --show-all --font-size 28 --fade-ms 500 --ease in-out-sine
 ```
 
-Font size is in logical pixels and scales with display DPI. `--font-fade-ms` is the total fade-out/fade-in replacement duration, defaulting to 400 ms (200 ms per half, matching the former renderer's default pacing). Zero disables animation. Cover fades default to 500 ms; the outgoing cover stays visible while the next one downloads. Opacity fades accept monotonic easing curves; elastic and bounce curves are rejected. Interrupted cover fades preserve the currently visible blend. Static scenes do not continuously redraw.
+Font size is in logical pixels and scales with display DPI. `--fade-ms` controls both cover and text transitions, defaulting to 500 ms. They start together when the new artwork is ready and finish together; the outgoing cover and text remain visible while it downloads. Zero disables both animations. The separate `--font-fade-ms` option has been removed. Opacity fades accept monotonic easing curves; elastic and bounce curves are rejected. Interrupted cover fades preserve the currently visible blend. Static scenes do not continuously redraw.
 
 ## Configuration
 
@@ -99,7 +99,6 @@ display:
   show_all: true
   font_size: 28
   fade_ms: 500
-  font_fade_ms: 400
 log:
   level: info
   format: text

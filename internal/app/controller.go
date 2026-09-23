@@ -114,6 +114,13 @@ func (c *Controller) scene() display.Update {
 		return scene
 	}
 	np := z.NowPlaying
+	// Publish artwork and metadata together. Updating the title while the image
+	// is still downloading would start its transition before the cover's.
+	if np.ImageKey != "" && (c.asset == nil || !strings.HasPrefix(c.asset.Key, string(np.ImageKey)+"/")) {
+		scene = c.lastScene
+		scene.Zone = z.Name
+		return scene
+	}
 	scene.NowPlaying = &display.Metadata{Title: np.Title, Artist: np.Artist, Album: np.Album}
 	// Keep the outgoing cover while its replacement downloads. Publishing nil
 	// here would blank the renderer and discard the source of the crossfade.

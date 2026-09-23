@@ -68,16 +68,22 @@ func TestCoverReplacementKeepsFadeSourceWhileLoading(t *testing.T) {
 	}
 	old := &display.Artwork{Key: "old/800"}
 	c.asset = old
+	c.scene()
 	z.NowPlaying = &roon.NowPlaying{ImageKey: "new", Title: "New title"}
 	c.replace([]roon.Zone{z})
 	pending := c.scene()
-	if pending.Artwork != old || pending.NoFade || pending.NowPlaying.Title != "New title" {
-		t.Fatal("pending download must preserve outgoing cover and allow metadata to fade")
+	if pending.Artwork != old || pending.NoFade || pending.NowPlaying.Title != "Old title" {
+		t.Fatal("pending download must preserve both outgoing cover and metadata")
 	}
 	next := &display.Artwork{Key: "new/800"}
 	c.asset = next
-	if ready := c.scene(); ready.Artwork != next || ready.NoFade {
-		t.Fatal("downloaded cover must replace the outgoing cover with a fade")
+	if ready := c.scene(); ready.Artwork != next || ready.NoFade || ready.NowPlaying.Title != "New title" {
+		t.Fatal("downloaded cover and new metadata must be published together for a fade")
+	}
+	z.NowPlaying = &roon.NowPlaying{ImageKey: "new", Title: "Another track on the same album"}
+	c.replace([]roon.Zone{z})
+	if sameCover := c.scene(); sameCover.Artwork != next || sameCover.NowPlaying.Title != z.NowPlaying.Title {
+		t.Fatal("a title-only change must not wait for another artwork download")
 	}
 	z.State = roon.ZoneStatePaused
 	c.replace([]roon.Zone{z})
@@ -111,8 +117,8 @@ func TestLoadingRetainsSceneButPauseStillBlanks(t *testing.T) {
 	z.State = roon.ZoneStatePlaying
 	z.NowPlaying = &roon.NowPlaying{ImageKey: "next", Title: "Next title"}
 	c.replace([]roon.Zone{z})
-	if pending := c.scene(); pending.Artwork != old || pending.NowPlaying.Title != "Next title" {
-		t.Fatal("playback must keep the outgoing image until the replacement is ready")
+	if pending := c.scene(); pending.Artwork != old || pending.NowPlaying.Title != "Old title" {
+		t.Fatal("playback must keep the outgoing image and text until the replacement is ready")
 	}
 	c.asset = &display.Artwork{Key: "next/800"}
 	if ready := c.scene(); ready.Artwork != c.asset || ready.NoFade {

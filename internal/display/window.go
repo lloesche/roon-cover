@@ -25,7 +25,7 @@ type Window struct {
 	Ease                                       string
 	ShowTitle, ShowArtist, ShowAlbum, ShowZone bool
 	FontPath                                   string
-	FontSize, FontFadeMS                       int
+	FontSize                                   int
 }
 type textLine struct {
 	animation textTransition
@@ -49,7 +49,7 @@ type windowGame struct {
 }
 
 func (d *Window) Run(ctx context.Context, updates <-chan Update) error {
-	if d.FadeMS < 0 || d.FontFadeMS < 0 {
+	if d.FadeMS < 0 {
 		return fmt.Errorf("fade durations must be nonnegative")
 	}
 	ease, err := FadeEasingByName(d.Ease)
@@ -109,7 +109,7 @@ func (d *Window) Run(ctx context.Context, updates <-chan Update) error {
 		}
 	}
 	for i := range g.lines {
-		g.lines[i].animation = textTransition{duration: time.Duration(d.FontFadeMS) * time.Millisecond, ease: ease}
+		g.lines[i].animation = textTransition{duration: g.cover.duration, ease: ease}
 	}
 	g.lines[3].animation.hold = 5 * time.Second
 	return ebiten.RunGame(g)

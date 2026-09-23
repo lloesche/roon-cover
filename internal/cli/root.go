@@ -39,9 +39,8 @@ type rootFlags struct {
 	ShowZone   bool
 	ShowAll    bool
 
-	FontPath   string
-	FontSize   int
-	FontFadeMS int
+	FontPath string
+	FontSize int
 }
 
 func newRootCmd(ctx context.Context) *cobra.Command {
@@ -90,7 +89,7 @@ func newRootCmd(ctx context.Context) *cobra.Command {
 	cmd.PersistentFlags().BoolVar(&flags.DownloadToTemp, "download-to-temp", false, "download cover art into the OS temp directory and log the file path")
 	cmd.PersistentFlags().BoolVar(&flags.Window, "window", false, "run windowed (800x800) instead of fullscreen")
 	cmd.PersistentFlags().IntVar(&flags.DisplayIndex, "display", 0, "monitor index to show on (0-based; console framebuffer mode exposes one monitor)")
-	cmd.PersistentFlags().IntVar(&flags.FadeMS, "fade-ms", 500, "crossfade duration in ms when cover changes (0 disables)")
+	cmd.PersistentFlags().IntVar(&flags.FadeMS, "fade-ms", 500, "cover and text transition duration in ms (0 disables)")
 	cmd.PersistentFlags().StringVar(&flags.Ease, "ease", "in-out-sine", "easing function for fades (e.g. in-sine, out-sine, in-out-sine, in-quad, out-cubic, out-expo, in-circ)")
 	cmd.PersistentFlags().StringVar(&flags.DisplaySleepCmd, "display-sleep-cmd", "", "command to run when display should sleep (optional)")
 	cmd.PersistentFlags().StringVar(&flags.DisplayWakeCmd, "display-wake-cmd", "", "command to run when display should wake (optional)")
@@ -104,7 +103,6 @@ func newRootCmd(ctx context.Context) *cobra.Command {
 
 	cmd.PersistentFlags().StringVar(&flags.FontPath, "font", "", "path to a .ttf font file (optional; default is OS-specific)")
 	cmd.PersistentFlags().IntVar(&flags.FontSize, "font-size", 28, "font size in logical pixels for overlays")
-	cmd.PersistentFlags().IntVar(&flags.FontFadeMS, "font-fade-ms", 400, "total text replacement fade duration in ms (0 disables; independent of cover fade)")
 
 	_ = cfg.BindPFlag("log.format", cmd.PersistentFlags().Lookup("log-format"))
 	_ = cfg.BindPFlag("log.level", cmd.PersistentFlags().Lookup("log-level"))
@@ -129,7 +127,6 @@ func newRootCmd(ctx context.Context) *cobra.Command {
 	_ = cfg.BindPFlag("display.show_all", cmd.PersistentFlags().Lookup("show-all"))
 	_ = cfg.BindPFlag("display.font", cmd.PersistentFlags().Lookup("font"))
 	_ = cfg.BindPFlag("display.font_size", cmd.PersistentFlags().Lookup("font-size"))
-	_ = cfg.BindPFlag("display.font_fade_ms", cmd.PersistentFlags().Lookup("font-fade-ms"))
 
 	cmd.AddCommand(newVersionCmd())
 	cmd.AddCommand(newRoonCmd())
@@ -165,7 +162,6 @@ func initConfig(cfg *viper.Viper, configPath string) error {
 	cfg.SetDefault("display.show_all", false)
 	cfg.SetDefault("display.font", "")
 	cfg.SetDefault("display.font_size", 28)
-	cfg.SetDefault("display.font_fade_ms", 400)
 
 	if configPath == "" {
 		return nil
