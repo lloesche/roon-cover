@@ -120,6 +120,9 @@ func (c *Client) connectAndRegister(ctx context.Context, core Core, onAuthorizat
 		ProvidedServices: []string{svcPairing, svcPing}, Token: creds.RegistryToken,
 	}
 	registered := make(chan struct{}, 1)
+	// Only the ordered response handler accesses this persistence snapshot.
+	// Live pairing state can change even when saving to disk fails.
+	persisted, hasPersisted := creds, found
 	// Registration is a long-lived CONTINUE stream: COMPLETE Unregistered must
 	// invalidate the session even after initial authorization succeeds.
 	err = conn.Subscribe(ctx, svcRegistry+"/register", request, func(f *mooFrame) error {
@@ -143,8 +146,14 @@ func (c *Client) connectAndRegister(ctx context.Context, core Core, onAuthorizat
 		s.creds.PairedCoreID = s.core.ID
 		savedCore, savedCreds := s.core, *s.creds
 		s.mu.Unlock()
-		if err := store.Save(ctx, savedCore, savedCreds); err != nil {
-			return err
+		// Skip unchanged writes to spare SD cards on every reconnect. A failed
+		// save must not end an authorized session: kiosks may run read-only.
+		if !hasPersisted || !sameCredentials(persisted, savedCreds) {
+			if err := store.Save(ctx, savedCore, savedCreds); err != nil {
+				c.log.Warn("Couldn't save Roon credentials; approval may be required after a restart", "error", err)
+			} else {
+				persisted, hasPersisted = savedCreds, true
+			}
 		}
 		select {
 		case registered <- struct{}{}:
@@ -155,7 +164,16 @@ func (c *Client) connectAndRegister(ctx context.Context, core Core, onAuthorizat
 	if err != nil {
 		return nil, err
 	}
-	prompt := time.NewTimer(time.Second)
+	// Roon sends nothing while approval is pending, so only elapsed time
+	// suggests it. A stored token normally registers at once; allow a slow
+	// Core (for example, one still starting) longer before asking the user.
+	promptDelay := unpairedPromptDelay
+	// The outgoing request is immutable; the live credentials are updated by
+	// the read loop as soon as registration succeeds.
+	if request.Token != "" {
+		promptDelay = pairedPromptDelay
+	}
+	prompt := time.NewTimer(promptDelay)
 	defer prompt.Stop()
 	for {
 		select {
@@ -175,6 +193,15 @@ func (c *Client) connectAndRegister(ctx context.Context, core Core, onAuthorizat
 			return s, nil
 		}
 	}
+}
+
+const (
+	unpairedPromptDelay = time.Second
+	pairedPromptDelay   = 10 * time.Second
+)
+
+func sameCredentials(a, b Credentials) bool {
+	return a.RegistryToken == b.RegistryToken && a.CoreKey == b.CoreKey && a.PairedCoreID == b.PairedCoreID
 }
 
 func (s *session) coreSnapshot() Core { s.mu.Lock(); defer s.mu.Unlock(); return s.core }

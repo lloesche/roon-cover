@@ -44,7 +44,8 @@ func (c *Controller) subscribe(ctx context.Context, updates chan subscriptionEve
 		var err error
 		if session == nil {
 			if failures >= 2 {
-				if _, _, explicit := net.SplitHostPort(strings.TrimSpace(c.Options.CoreSelector)); explicit != nil {
+				// An explicit host:port is the user's chosen endpoint; never replace it.
+				if !isHostPort(c.Options.CoreSelector) {
 					found, discoveryErr := rediscoverCore(ctx, c.Source, core, c.Options.CoreSelector)
 					if discoveryErr == nil {
 						core = found
@@ -87,6 +88,10 @@ func (c *Controller) subscribe(ctx context.Context, updates chan subscriptionEve
 		}
 		delay = min(30*time.Second, delay*2)
 	}
+}
+func isHostPort(selector string) bool {
+	_, _, err := net.SplitHostPort(strings.TrimSpace(selector))
+	return err == nil
 }
 func consumeSession(ctx context.Context, session *roon.Session, updates chan subscriptionEvent) error {
 	for {

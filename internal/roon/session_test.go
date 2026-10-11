@@ -45,6 +45,11 @@ func (m *memoryCredentials) Save(_ context.Context, _ Core, value Credentials) e
 
 func sessionServer(t *testing.T, ctx context.Context, approvalDelay time.Duration, revoked <-chan struct{}, connections, registrations *atomic.Int32, onRegister ...func(registryRegisterRequest)) Core {
 	t.Helper()
+	return sessionServerWithTokens(t, ctx, approvalDelay, revoked, connections, registrations, []string{"token"}, onRegister...)
+}
+
+func sessionServerWithTokens(t *testing.T, ctx context.Context, approvalDelay time.Duration, revoked <-chan struct{}, connections, registrations *atomic.Int32, tokens []string, onRegister ...func(registryRegisterRequest)) Core {
+	t.Helper()
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		ws, err := websocket.Accept(w, r, nil)
 		if err != nil {
@@ -86,7 +91,7 @@ func sessionServer(t *testing.T, ctx context.Context, approvalDelay time.Duratio
 				case <-timer.C:
 				}
 				// Enable returns Registered, without a separate pairing request.
-				response, err = encodeMooContinue(frame.RequestID, "Registered", registryRegistered{CoreID: "test-core", DisplayName: "Test", Token: "token"})
+				response, err = encodeMooContinue(frame.RequestID, "Registered", registryRegistered{CoreID: "test-core", DisplayName: "Test", Token: tokens[0]})
 			case svcTransport + "/subscribe_zones":
 				response, err = encodeMooContinue(frame.RequestID, "Subscribed", transportSubscribeZonesResponse{Zones: []zoneRaw{{ZoneID: "zone", DisplayName: "Listening", State: "playing"}}})
 			default:
@@ -99,6 +104,14 @@ func sessionServer(t *testing.T, ctx context.Context, approvalDelay time.Duratio
 			}
 			if err := ws.Write(ctx, websocket.MessageBinary, response); err != nil {
 				return
+			}
+			if frame.Name == "register" {
+				for _, token := range tokens[1:] {
+					response, _ := encodeMooContinue(frame.RequestID, "Registered", registryRegistered{CoreID: "test-core", DisplayName: "Test", Token: token})
+					if err := ws.Write(ctx, websocket.MessageBinary, response); err != nil {
+						return
+					}
+				}
 			}
 			if frame.Name == "subscribe_zones" {
 				closed := ws.CloseRead(ctx)
@@ -202,6 +215,115 @@ func TestSessionMigratesOnlyMatchingExplicitAddressCredentials(t *testing.T) {
 			value, found, err := store.Load(ctx, session.Core)
 			if err != nil || !found || value.CoreKey != "test-core" || value.PairedCoreID != "test-core" {
 				t.Fatalf("canonical credentials not saved: %v", err)
+			}
+		})
+	}
+}
+
+type failingSaveCredentials struct{ memoryCredentials }
+
+func (f *failingSaveCredentials) Save(context.Context, Core, Credentials) error {
+	return errors.New("read-only file system")
+}
+
+func TestSessionSurvivesCredentialSaveFailure(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	var connections, registrations atomic.Int32
+	core := sessionServer(t, ctx, 0, nil, &connections, &registrations)
+	client := NewClient(Config{}, WithCredentialStore(&failingSaveCredentials{}), WithLogger(slog.New(slog.NewTextHandler(io.Discard, nil))))
+	session, err := client.OpenSession(ctx, core, nil)
+	if err != nil {
+		t.Fatalf("unwritable credentials ended an authorized session: %v", err)
+	}
+	session.Close()
+}
+
+func TestSessionSkipsUnchangedCredentialSave(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	var connections, registrations atomic.Int32
+	core := sessionServer(t, ctx, 0, nil, &connections, &registrations)
+	store := &memoryCredentials{value: Credentials{CoreKey: "test-core", RegistryToken: "token", PairedCoreID: "test-core"}}
+	session, err := NewClient(Config{}, WithCredentialStore(store)).OpenSession(ctx, core, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	session.Close()
+	store.mu.Lock()
+	defer store.mu.Unlock()
+	if store.saves != 0 {
+		t.Fatalf("unchanged credentials were rewritten %d time(s)", store.saves)
+	}
+}
+
+func TestSessionStoredTokenToleratesSlowRegistration(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	var connections, registrations atomic.Int32
+	core := sessionServer(t, ctx, 1500*time.Millisecond, nil, &connections, &registrations)
+	store := &memoryCredentials{value: Credentials{CoreKey: "test-core", RegistryToken: "token", PairedCoreID: "test-core"}}
+	prompted := false
+	session, err := NewClient(Config{}, WithCredentialStore(store)).OpenSession(ctx, core, func() { prompted = true })
+	if err != nil {
+		t.Fatal(err)
+	}
+	session.Close()
+	if prompted {
+		t.Fatal("a slow Core asked an already paired kiosk for authorization")
+	}
+}
+
+type retrySaveCredentials struct {
+	memoryCredentials
+	failures int
+}
+
+func (s *retrySaveCredentials) Save(_ context.Context, _ Core, value Credentials) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.saves++
+	if s.failures > 0 {
+		s.failures--
+		return errors.New("temporary save failure")
+	}
+	s.value = value
+	return nil
+}
+
+func TestSessionPersistsOnlySuccessfullySavedCredentials(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		stored   string
+		failures int
+		want     int
+	}{
+		{name: "first authorization", want: 1},
+		{name: "token rotation", stored: "old-token", want: 1},
+		{name: "retry failed first save", failures: 1, want: 2},
+		{name: "retry failed token rotation", stored: "old-token", failures: 1, want: 2},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+			defer cancel()
+			var connections, registrations atomic.Int32
+			core := sessionServerWithTokens(t, ctx, 0, nil, &connections, &registrations, []string{"token", "token", "token"})
+			store := &retrySaveCredentials{failures: tc.failures}
+			if tc.stored != "" {
+				store.value = Credentials{CoreKey: "test-core", RegistryToken: tc.stored, PairedCoreID: "test-core"}
+			}
+			client := NewClient(Config{}, WithCredentialStore(store), WithLogger(slog.New(slog.NewTextHandler(io.Discard, nil))))
+			session, err := client.OpenSession(ctx, core, nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer session.Close()
+			// The snapshot follows every registration frame on the same read
+			// loop, so all save attempts have completed before OpenSession returns.
+			store.mu.Lock()
+			defer store.mu.Unlock()
+			if store.saves != tc.want || store.value.RegistryToken != "token" {
+				t.Fatalf("got %d saves with token %q; want %d saves with the current token", store.saves, store.value.RegistryToken, tc.want)
 			}
 		})
 	}

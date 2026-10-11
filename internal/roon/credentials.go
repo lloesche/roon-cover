@@ -50,10 +50,8 @@ func NewFileCredentialStore(appName string) (CredentialStore, error) {
 	}
 
 	cfgDir := filepath.Join(dir, appName)
-	if err := os.MkdirAll(cfgDir, 0o700); err != nil {
-		return nil, fmt.Errorf("roon: credential store: mkdir: %w", err)
-	}
-
+	// Loading credentials must not require a writable filesystem. Create the
+	// directory only when saving; a kiosk may connect without persisting them.
 	return &fileCredentialStore{path: filepath.Join(cfgDir, "credentials.json")}, nil
 }
 
@@ -88,6 +86,9 @@ func (s *fileCredentialStore) Save(ctx context.Context, core Core, creds Credent
 	key := coreKey(core)
 	if key == "" {
 		return errors.New("roon: credential store: core has no ID or name")
+	}
+	if err := os.MkdirAll(filepath.Dir(s.path), 0o700); err != nil {
+		return fmt.Errorf("roon: credential store: mkdir: %w", err)
 	}
 
 	m, err := s.readAll()
