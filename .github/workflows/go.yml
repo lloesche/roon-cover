@@ -57,6 +57,9 @@ jobs:
       - run: xvfb-run -a go test ./...
         if: runner.os == 'Linux'
       - run: go vet ./...
+      - name: Static analysis
+        if: matrix.os == 'ubuntu-24.04'
+        run: go run honnef.co/go/tools/cmd/staticcheck@v0.8.1 ./...
       - run: go build -o build/ ./cmd/roon-cover
       - name: Linux GPU pipeline checks (Mesa)
         if: runner.os == 'Linux'

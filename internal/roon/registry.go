@@ -2,6 +2,7 @@ package roon
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -53,10 +54,8 @@ type session struct {
 	core Core
 	conn *mooConn
 
-	log          *slog.Logger
-	pairedSignal chan struct{}
-	pairedOnce   sync.Once
-	creds        *Credentials
+	log   *slog.Logger
+	creds *Credentials
 }
 
 func (c *Client) connectAndRegister(ctx context.Context, core Core, onAuthorization func()) (*session, error) {
@@ -78,7 +77,7 @@ func (c *Client) connectAndRegister(ctx context.Context, core Core, onAuthorizat
 		if f.ResponseName != "Success" {
 			return fmt.Errorf("registry info: %s", f.ResponseName)
 		}
-		return jsonUnmarshal(f.BodyRaw, &info)
+		return json.Unmarshal(f.BodyRaw, &info)
 	})
 	if err != nil {
 		return nil, err
@@ -111,7 +110,7 @@ func (c *Client) connectAndRegister(ctx context.Context, core Core, onAuthorizat
 			creds = legacy
 		}
 	}
-	s := &session{core: core, conn: conn, log: c.log, pairedSignal: make(chan struct{}), creds: &creds}
+	s := &session{core: core, conn: conn, log: c.log, creds: &creds}
 	s.registerPingService()
 	s.registerPairingService()
 	request := registryRegisterRequest{
@@ -128,7 +127,7 @@ func (c *Client) connectAndRegister(ctx context.Context, core Core, onAuthorizat
 			return fmt.Errorf("roon: registration ended: %s", f.ResponseName)
 		}
 		var reg registryRegistered
-		if err := jsonUnmarshal(f.BodyRaw, &reg); err != nil {
+		if err := json.Unmarshal(f.BodyRaw, &reg); err != nil {
 			return err
 		}
 		if reg.CoreID != string(core.ID) || reg.Token == "" {
@@ -178,5 +177,4 @@ func (c *Client) connectAndRegister(ctx context.Context, core Core, onAuthorizat
 	}
 }
 
-func (s *session) credentials() Credentials { s.mu.Lock(); defer s.mu.Unlock(); return *s.creds }
-func (s *session) coreSnapshot() Core       { s.mu.Lock(); defer s.mu.Unlock(); return s.core }
+func (s *session) coreSnapshot() Core { s.mu.Lock(); defer s.mu.Unlock(); return s.core }

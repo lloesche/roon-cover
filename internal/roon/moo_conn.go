@@ -2,6 +2,7 @@ package roon
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -51,7 +52,7 @@ func (r *mooRequest) JSON(v any) error {
 	if len(r.body) == 0 {
 		return nil
 	}
-	return jsonUnmarshal(r.body, v)
+	return json.Unmarshal(r.body, v)
 }
 
 func (r *mooRequest) SendContinue(name string, body any) error {

@@ -2,6 +2,14 @@ package display
 
 import "time"
 
+type textPhase int
+
+const (
+	textPhaseNone textPhase = iota
+	textPhaseFadeOut
+	textPhaseFadeIn
+)
+
 // textTransition is independent of textures and samples only its supplied clock.
 // Duration is the total fade-out/fade-in duration of a replacement.
 type textTransition struct {
