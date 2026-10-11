@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"net"
 	"sync"
 	"time"
 )
@@ -88,14 +89,27 @@ func (c *Client) connectAndRegister(ctx context.Context, core Core, onAuthorizat
 	if core.ID != "" && core.ID != CoreID(info.CoreID) {
 		return nil, errors.New("roon: endpoint belongs to a different core")
 	}
+	lookupCore := core
 	core.ID = CoreID(info.CoreID)
 	store, err := c.credentialStore()
 	if err != nil {
 		return nil, err
 	}
-	creds, _, err := store.Load(ctx, core)
+	creds, found, err := store.Load(ctx, core)
 	if err != nil {
 		return nil, err
+	}
+	// Older explicit-address configurations saved under the supplied name.
+	// Migrate only credentials that identify this exact Core.
+	_, _, explicitErr := net.SplitHostPort(lookupCore.Name)
+	if !found && lookupCore.ID == "" && explicitErr == nil {
+		legacy, ok, loadErr := store.Load(ctx, lookupCore)
+		if loadErr != nil {
+			return nil, loadErr
+		}
+		if ok && legacy.PairedCoreID == core.ID {
+			creds = legacy
+		}
 	}
 	s := &session{core: core, conn: conn, log: c.log, pairedSignal: make(chan struct{}), creds: &creds}
 	s.registerPingService()
