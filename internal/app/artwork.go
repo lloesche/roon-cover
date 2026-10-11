@@ -8,15 +8,18 @@ import (
 
 type artworkRequest struct {
 	ctx      context.Context
+	core     roon.Core
+	version  uint64
 	key      string
 	imageKey roon.ImageKey
 	size     int
 	zone     string
 }
 type artworkResult struct {
-	key   string
-	asset *display.Artwork
-	err   error
+	key     string
+	version uint64
+	asset   *display.Artwork
+	err     error
 }
 
 // One worker plus a latest-request mailbox bounds downloads and decoding work.
@@ -30,7 +33,7 @@ func (c *Controller) loadArtwork(ctx context.Context, jobs <-chan artworkRequest
 			if job.ctx.Err() != nil {
 				continue
 			}
-			data, mime, err := c.Source.FetchImage(job.ctx, c.Core, job.imageKey, roon.ImageFetchOptions{Size: job.size})
+			data, mime, err := c.Source.FetchImage(job.ctx, job.core, job.imageKey, roon.ImageFetchOptions{Size: job.size})
 			var asset *display.Artwork
 			if err == nil && job.ctx.Err() == nil {
 				asset, err = display.DecodeArtwork(job.key, data)
@@ -42,7 +45,7 @@ func (c *Controller) loadArtwork(ctx context.Context, jobs <-chan artworkRequest
 				c.Options.SaveArtwork(job.zone, data, mime)
 			}
 			select {
-			case results <- artworkResult{key: job.key, asset: asset, err: err}:
+			case results <- artworkResult{key: job.key, version: job.version, asset: asset, err: err}:
 			case <-ctx.Done():
 				return
 			}

@@ -14,12 +14,14 @@ import (
 
 type Source interface {
 	OpenSession(context.Context, roon.Core, func()) (*roon.Session, error)
+	Discover(context.Context) ([]roon.Core, error)
 	FetchImage(context.Context, roon.Core, roon.ImageKey, roon.ImageFetchOptions) ([]byte, string, error)
 }
 type Options struct {
-	Zone        string
-	SleepAfter  time.Duration
-	SaveArtwork func(string, []byte, string)
+	CoreSelector string
+	Zone         string
+	SleepAfter   time.Duration
+	SaveArtwork  func(string, []byte, string)
 }
 type Controller struct {
 	InitialSession *roon.Session
@@ -158,6 +160,8 @@ func (c *Controller) Run(ctx context.Context, scenes chan display.Update, info <
 	go func() { defer close(artworkDone); c.loadArtwork(ctx, jobs, results) }()
 	var idleSince, nextAttempt time.Time
 	var requested string
+	var requestVersion uint64
+	powerTarget := false
 	var fetchCancel context.CancelFunc
 	defer func() {
 		if fetchCancel != nil {
@@ -165,10 +169,12 @@ func (c *Controller) Run(ctx context.Context, scenes chan display.Update, info <
 		}
 	}()
 	connected := true
+	var connectionStatus *display.Status
 	fetching := false
 	retry := time.Second
-	tick := time.NewTicker(100 * time.Millisecond)
-	defer tick.Stop()
+	timer := time.NewTimer(0)
+	defer timer.Stop()
+	var deadline <-chan time.Time = timer.C
 	for {
 		dirty := false
 		select {
@@ -176,7 +182,20 @@ func (c *Controller) Run(ctx context.Context, scenes chan display.Update, info <
 			return nil
 		case update := <-updates:
 			connected = update.err == nil
+			connectionStatus = update.status
 			if connected {
+				if update.core.Host != "" && update.core != c.Core {
+					c.Core = update.core
+					if fetchCancel != nil {
+						fetchCancel()
+						fetchCancel = nil
+					}
+					requestVersion++
+					requested, fetching = "", false
+					nextAttempt = time.Time{}
+					c.asset = nil
+					c.lastScene, c.sceneZone = display.Update{}, ""
+				}
 				c.replace(update.zones)
 			} else {
 				c.Log.Warn("zone subscription lost; reconnecting", "error", update.err)
@@ -201,10 +220,14 @@ func (c *Controller) Run(ctx context.Context, scenes chan display.Update, info <
 				dirty = true
 			}
 		case result := <-results:
-			if result.key != requested {
+			if result.key != requested || result.version != requestVersion {
 				continue
 			}
 			fetching = false
+			if fetchCancel != nil {
+				fetchCancel()
+				fetchCancel = nil
+			}
 			if result.err != nil {
 				c.Log.Warn("artwork fetch failed; retrying", "error", result.err)
 				nextAttempt = time.Now().Add(retry)
@@ -214,17 +237,19 @@ func (c *Controller) Run(ctx context.Context, scenes chan display.Update, info <
 				retry = time.Second
 				dirty = true
 			}
-		case <-tick.C:
+		case <-deadline:
 		}
+		now := time.Now()
 		z := c.SelectedZone()
 		if connected && (z.State == roon.ZoneStatePlaying || z.State == roon.ZoneStateLoading) {
 			idleSince = time.Time{}
-			publishPower(power, false)
 		} else if idleSince.IsZero() {
-			idleSince = time.Now()
+			idleSince = now
 		}
-		if c.Options.SleepAfter > 0 && !idleSince.IsZero() && time.Since(idleSince) >= c.Options.SleepAfter {
-			publishPower(power, true)
+		sleep := c.Options.SleepAfter > 0 && !idleSince.IsZero() && !now.Before(idleSince.Add(c.Options.SleepAfter))
+		if sleep != powerTarget {
+			publishPower(power, sleep)
+			powerTarget = sleep
 		}
 		key := ""
 		var imageKey roon.ImageKey
@@ -236,6 +261,7 @@ func (c *Controller) Run(ctx context.Context, scenes chan display.Update, info <
 			if fetchCancel != nil {
 				fetchCancel()
 			}
+			requestVersion++
 			requested = key
 			fetching = false
 			retry = time.Second
@@ -246,7 +272,7 @@ func (c *Controller) Run(ctx context.Context, scenes chan display.Update, info <
 		if key != "" && !fetching && (c.asset == nil || c.asset.Key != key) && !time.Now().Before(nextAttempt) {
 			fetchCtx, stop := context.WithTimeout(ctx, 15*time.Second)
 			fetchCancel = stop
-			request := artworkRequest{ctx: fetchCtx, key: key, imageKey: imageKey, size: c.size, zone: z.Name}
+			request := artworkRequest{ctx: fetchCtx, core: c.Core, version: requestVersion, key: key, imageKey: imageKey, size: c.size, zone: z.Name}
 			select {
 			case <-jobs:
 			default:
@@ -258,9 +284,28 @@ func (c *Controller) Run(ctx context.Context, scenes chan display.Update, info <
 			scene := c.scene()
 			if !connected {
 				scene = display.Update{Zone: z.Name, Status: &display.Status{Title: "Connection to Roon lost", Detail: "Waiting for your Roon Server…", Hint: "Reconnecting automatically."}, NoFade: true}
+				if connectionStatus != nil {
+					scene.Status = connectionStatus
+				}
 				c.lastScene, c.sceneZone = display.Update{}, ""
 			}
 			display.Publish(scenes, scene)
+		}
+		// Sleep until the next actual deadline; the power worker owns its retries.
+		var nextWake time.Time
+		if c.Options.SleepAfter > 0 && !idleSince.IsZero() && !sleep {
+			nextWake = idleSince.Add(c.Options.SleepAfter)
+		}
+		if key != "" && !fetching && (c.asset == nil || c.asset.Key != key) {
+			if nextWake.IsZero() || nextAttempt.Before(nextWake) {
+				nextWake = nextAttempt
+			}
+		}
+		timer.Stop()
+		deadline = nil
+		if !nextWake.IsZero() {
+			timer.Reset(max(time.Nanosecond, time.Until(nextWake)))
+			deadline = timer.C
 		}
 	}
 }

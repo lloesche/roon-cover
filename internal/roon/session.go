@@ -16,7 +16,12 @@ type Session struct {
 	connection *mooConn
 }
 
-func (s *Session) Close() error { return s.connection.Close() }
+func (s *Session) Close() error {
+	if s.connection == nil {
+		return nil
+	}
+	return s.connection.Close()
+}
 
 // OpenSession waits for authorization and the initial subscription snapshot.
 // Authorization has no human-response deadline; cancellation and connection loss

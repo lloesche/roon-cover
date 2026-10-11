@@ -65,3 +65,5 @@ func TestZoneChangeCancelsBlockedArtwork(t *testing.T) {
 		}
 	}
 }
+
+func (s *blockedArtworkSource) Discover(context.Context) ([]roon.Core, error) { return nil, nil }
