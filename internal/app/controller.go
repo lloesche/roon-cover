@@ -13,7 +13,7 @@ import (
 )
 
 type Source interface {
-	SubscribeZones(context.Context, roon.Core, func(roon.ZoneUpdate) error) error
+	OpenSession(context.Context, roon.Core, func()) (*roon.Session, error)
 	FetchImage(context.Context, roon.Core, roon.ImageKey, roon.ImageFetchOptions) ([]byte, string, error)
 }
 type Options struct {
@@ -22,17 +22,18 @@ type Options struct {
 	SaveArtwork func(string, []byte, string)
 }
 type Controller struct {
-	Source    Source
-	Core      roon.Core
-	Options   Options
-	Log       *slog.Logger
-	Power     func(context.Context, bool) error
-	zones     []roon.Zone
-	active    roon.ZoneID
-	size      int
-	asset     *display.Artwork
-	lastScene display.Update
-	sceneZone roon.ZoneID
+	InitialSession *roon.Session
+	Source         Source
+	Core           roon.Core
+	Options        Options
+	Log            *slog.Logger
+	Power          func(context.Context, bool) error
+	zones          []roon.Zone
+	active         roon.ZoneID
+	size           int
+	asset          *display.Artwork
+	lastScene      display.Update
+	sceneZone      roon.ZoneID
 }
 
 func (c *Controller) Initialize(zones []roon.Zone) error {
@@ -145,14 +146,16 @@ func (c *Controller) Run(ctx context.Context, scenes chan display.Update, info <
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	updates := make(chan subscriptionEvent, 1)
-	go c.subscribe(ctx, updates)
+	subscriptionDone := make(chan struct{})
+	go func() { defer close(subscriptionDone); c.subscribe(ctx, updates) }()
 	power := make(chan bool, 1)
 	powerDone := make(chan struct{})
 	go func() { defer close(powerDone); c.runPower(ctx, power) }()
-	defer func() { cancel(); <-powerDone }()
+	artworkDone := make(chan struct{})
+	defer func() { cancel(); <-powerDone; <-subscriptionDone; <-artworkDone }()
 	jobs := make(chan artworkRequest, 1)
 	results := make(chan artworkResult, 1)
-	go c.loadArtwork(ctx, jobs, results)
+	go func() { defer close(artworkDone); c.loadArtwork(ctx, jobs, results) }()
 	var idleSince, nextAttempt time.Time
 	var requested string
 	var fetchCancel context.CancelFunc

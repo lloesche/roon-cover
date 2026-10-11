@@ -22,11 +22,13 @@ func newRoonZonesCmd() *cobra.Command {
 			}, roon.WithLogger(l))
 
 			// Resolve core (configured vs discovery) and ensure we're paired.
-			core, err := ensureCoreAndPaired(cmd.Context(), cmd, client, nil)
+			session, err := openCoreSession(cmd.Context(), cmd, client, nil)
 			if err != nil {
 				return err
 			}
 
+			defer session.Close()
+			core := session.Core
 			zoneFilter := strings.TrimSpace(configFor(cmd).GetString("roon.zone"))
 			downloadToTemp := configFor(cmd).GetBool("download.to_temp")
 			var lastKey roon.ImageKey
@@ -34,11 +36,7 @@ func newRoonZonesCmd() *cobra.Command {
 			var lastState roon.ZoneState
 
 			if !watch {
-				zones, err := client.GetZones(cmd.Context(), core)
-				if err != nil {
-					return err
-				}
-				for _, z := range zones {
+				for _, z := range session.Zones {
 					if zoneFilter != "" && !strings.EqualFold(strings.TrimSpace(z.Name), zoneFilter) {
 						continue
 					}
@@ -47,7 +45,7 @@ func newRoonZonesCmd() *cobra.Command {
 				return nil
 			}
 
-			return client.SubscribeZones(cmd.Context(), core, func(update roon.ZoneUpdate) error {
+			observe := func(update roon.ZoneUpdate) error {
 				for _, z := range update.Zones {
 					if zoneFilter != "" && !strings.EqualFold(strings.TrimSpace(z.Name), zoneFilter) {
 						continue
@@ -75,7 +73,22 @@ func newRoonZonesCmd() *cobra.Command {
 					}
 				}
 				return nil
-			})
+			}
+			if err := observe(roon.ZoneUpdate{Zones: session.Zones}); err != nil {
+				return err
+			}
+			for {
+				select {
+				case <-cmd.Context().Done():
+					return nil
+				case <-session.Done:
+					return fmt.Errorf("roon: zone subscription disconnected")
+				case update := <-session.Updates:
+					if err := observe(update); err != nil {
+						return err
+					}
+				}
+			}
 		},
 	}
 	cmd.Flags().BoolVar(&watch, "watch", false, "watch for live zone updates (subscribe_zones)")

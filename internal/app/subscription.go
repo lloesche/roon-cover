@@ -30,12 +30,21 @@ func publishSubscription(ch chan subscriptionEvent, event subscriptionEvent) {
 }
 func (c *Controller) subscribe(ctx context.Context, updates chan subscriptionEvent) {
 	delay := time.Second
+	session := c.InitialSession
 	for {
 		started := time.Now()
-		err := c.Source.SubscribeZones(ctx, c.Core, func(u roon.ZoneUpdate) error {
-			publishSubscription(updates, subscriptionEvent{zones: u.Zones})
-			return nil
-		})
+		var err error
+		if session == nil {
+			session, err = c.Source.OpenSession(ctx, c.Core, nil)
+			if err == nil {
+				publishSubscription(updates, subscriptionEvent{zones: session.Zones})
+			}
+		}
+		if err == nil {
+			err = consumeSession(ctx, session, updates)
+			session.Close()
+			session = nil
+		}
 		if ctx.Err() != nil {
 			return
 		}
@@ -54,5 +63,22 @@ func (c *Controller) subscribe(ctx context.Context, updates chan subscriptionEve
 		case <-timer.C:
 		}
 		delay = min(30*time.Second, delay*2)
+	}
+}
+func consumeSession(ctx context.Context, session *roon.Session, updates chan subscriptionEvent) error {
+	for {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-session.Done:
+			return errors.New("roon: zone subscription disconnected")
+		case update := <-session.Updates:
+			select {
+			case <-session.Done:
+				return errors.New("roon: zone subscription disconnected")
+			default:
+			}
+			publishSubscription(updates, subscriptionEvent{zones: update.Zones})
+		}
 	}
 }

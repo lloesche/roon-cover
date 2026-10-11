@@ -86,6 +86,13 @@ func dialMoo(ctx context.Context, log *slog.Logger, host string, port int) (*moo
 
 	go c.readLoop()
 	go c.heartbeatLoop()
+	go func() {
+		select {
+		case <-ctx.Done():
+			c.Close()
+		case <-c.closed:
+		}
+	}()
 	return c, nil
 }
 

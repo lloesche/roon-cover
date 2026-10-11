@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"sync"
 )
 
 type transportSubscribeZonesResponse struct {
@@ -45,49 +44,11 @@ type lineBlock3 struct {
 	Line3 string `json:"line3"`
 }
 
-func (c *Client) SubscribeZones(ctx context.Context, core Core, onUpdate func(ZoneUpdate) error) error {
-	// SubscribeZones expects the caller to keep ctx alive.
-	// For now, we create a new connection and keep it open until ctx is canceled.
-	// In the kiosk app, this will be the main long-lived connection.
-
-	credsStore, err := c.credentialStore()
-	if err != nil {
-		return err
-	}
-	var creds Credentials
-	if credsStore != nil {
-		loaded, _, loadErr := credsStore.Load(ctx, core)
-		if loadErr != nil {
-			return loadErr
-		}
-		creds = loaded
-	}
-
-	s, err := c.connectAndRegister(ctx, core, &creds)
-	if err != nil {
-		return err
-	}
-	// Keep connection alive until ctx ends.
-	defer s.conn.Close()
-
-	creds = s.credentials()
-	// Persist any updated registry token.
-	if credsStore != nil && creds.RegistryToken != "" {
-		if err := credsStore.Save(ctx, core, creds); err != nil {
-			c.log.Warn("save registry credentials failed", "error", err)
-		}
-	}
-
-	// Subscribe.
-	subKey := 1
-	type subscribeArgs struct {
-		SubscriptionKey int `json:"subscription_key"`
-	}
-
+func (s *session) subscribeZones(ctx context.Context, onUpdate func(ZoneUpdate) error) error {
 	zonesByID := map[string]Zone{}
-	var mu sync.Mutex
+	subscribed := false
 
-	err = s.conn.Subscribe(ctx, svcTransport+"/subscribe_zones", subscribeArgs{SubscriptionKey: subKey}, func(f *mooFrame) error {
+	return s.conn.Subscribe(ctx, svcTransport+"/subscribe_zones", map[string]int{"subscription_key": 1}, func(f *mooFrame) error {
 		// Expect CONTINUE frames with ResponseName Subscribed/Changed/Unsubscribed.
 		if f.ResponseName == "" {
 			return nil
@@ -100,16 +61,17 @@ func (c *Client) SubscribeZones(ctx context.Context, core Core, onUpdate func(Zo
 			}
 		}
 
-		mu.Lock()
-		defer mu.Unlock()
-
 		switch f.ResponseName {
 		case "Subscribed":
+			subscribed = true
 			zonesByID = map[string]Zone{}
 			for _, z := range payload.Zones {
 				zonesByID[z.ZoneID] = mapZone(z)
 			}
 		case "Changed":
+			if !subscribed {
+				return errors.New("roon: zone change before subscription snapshot")
+			}
 			for _, zr := range payload.ZonesRemoved {
 				delete(zonesByID, zr.ZoneID)
 			}
@@ -123,9 +85,7 @@ func (c *Client) SubscribeZones(ctx context.Context, core Core, onUpdate func(Zo
 			return errors.New("roon: zone subscription ended")
 		default:
 			// Could be an error; bubble it up.
-			if f.ResponseName != "Success" {
-				return fmt.Errorf("subscribe_zones: %s", f.ResponseName)
-			}
+			return fmt.Errorf("subscribe_zones: %s", f.ResponseName)
 		}
 
 		if onUpdate != nil {
@@ -137,74 +97,44 @@ func (c *Client) SubscribeZones(ctx context.Context, core Core, onUpdate func(Zo
 		}
 		return nil
 	})
+}
+
+// SubscribeZones is a convenience for diagnostics. The kiosk owns a Session
+// directly so startup and playback share the same connection.
+func (c *Client) SubscribeZones(ctx context.Context, core Core, onUpdate func(ZoneUpdate) error) error {
+	s, err := c.OpenSession(ctx, core, nil)
 	if err != nil {
 		return err
 	}
-
-	// Block until canceled.
-	select {
-	case <-ctx.Done():
-	case <-s.conn.closed:
-		return errors.New("roon: zone subscription disconnected")
+	defer s.Close()
+	if onUpdate != nil {
+		if err := onUpdate(ZoneUpdate{Zones: s.Zones}); err != nil {
+			return err
+		}
 	}
-	if errors.Is(ctx.Err(), context.Canceled) {
-		return nil
+	for {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-s.Done:
+			return errors.New("roon: zone subscription disconnected")
+		case update := <-s.Updates:
+			if onUpdate != nil {
+				if err := onUpdate(update); err != nil {
+					return err
+				}
+			}
+		}
 	}
-	return ctx.Err()
 }
 
 func (c *Client) GetZones(ctx context.Context, core Core) ([]Zone, error) {
-	credsStore, err := c.credentialStore()
+	s, err := c.OpenSession(ctx, core, nil)
 	if err != nil {
 		return nil, err
 	}
-	var creds Credentials
-	if credsStore != nil {
-		loaded, _, loadErr := credsStore.Load(ctx, core)
-		if loadErr != nil {
-			return nil, loadErr
-		}
-		creds = loaded
-	}
-
-	s, err := c.connectAndRegister(ctx, core, &creds)
-	if err != nil {
-		return nil, err
-	}
-	defer s.conn.Close()
-
-	creds = s.credentials()
-	// Persist any updated registry token.
-	if credsStore != nil && creds.RegistryToken != "" {
-		if err := credsStore.Save(ctx, core, creds); err != nil {
-			c.log.Warn("save registry credentials failed", "error", err)
-		}
-	}
-
-	type resp struct {
-		Zones []zoneRaw `json:"zones"`
-	}
-	var out resp
-
-	c.log.Debug("calling transport/get_zones")
-	err = s.conn.Call(ctx, svcTransport+"/get_zones", nil, func(f *mooFrame) error {
-		if f.ResponseName != "Success" {
-			return fmt.Errorf("get_zones: %s", f.ResponseName)
-		}
-		if len(f.BodyRaw) == 0 {
-			return nil
-		}
-		return jsonUnmarshal(f.BodyRaw, &out)
-	})
-	if err != nil {
-		return nil, err
-	}
-
-	zones := make([]Zone, 0, len(out.Zones))
-	for _, z := range out.Zones {
-		zones = append(zones, mapZone(z))
-	}
-	return zones, nil
+	defer s.Close()
+	return s.Zones, nil
 }
 
 func mapZone(z zoneRaw) Zone {

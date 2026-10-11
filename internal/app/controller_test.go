@@ -13,8 +13,9 @@ import (
 
 type source struct{ calls int }
 
-func (s *source) SubscribeZones(context.Context, roon.Core, func(roon.ZoneUpdate) error) error {
-	return nil
+func (s *source) OpenSession(ctx context.Context, _ roon.Core, _ func()) (*roon.Session, error) {
+	<-ctx.Done()
+	return nil, ctx.Err()
 }
 func (s *source) FetchImage(context.Context, roon.Core, roon.ImageKey, roon.ImageFetchOptions) ([]byte, string, error) {
 	s.calls++
