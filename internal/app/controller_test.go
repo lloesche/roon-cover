@@ -181,3 +181,39 @@ func TestLoadingRetainsSceneButPauseStillBlanks(t *testing.T) {
 }
 
 func (s *source) Discover(context.Context) ([]roon.Core, error) { return nil, nil }
+
+func TestKeyboardZoneNoticeSurvivesLoadingAndCoalescedSnapshots(t *testing.T) {
+	c := Controller{Options: Options{Zone: "Living room"}}
+	zones := []roon.Zone{
+		{ID: "a", Name: "Living room", State: roon.ZoneStatePlaying, NowPlaying: &roon.NowPlaying{ImageKey: "old"}},
+		{ID: "b", Name: "Bedroom", State: roon.ZoneStatePlaying, NowPlaying: &roon.NowPlaying{ImageKey: "pending"}},
+	}
+	if err := c.Initialize(zones); err != nil {
+		t.Fatal(err)
+	}
+	old := &display.Artwork{Key: "old/800"}
+	c.asset = old
+	if c.scene().ZoneSelection != 0 {
+		t.Fatal("startup was treated as keyboard input")
+	}
+	c.cycle(display.EventNextZone)
+	pending := c.scene()
+	if pending.Zone != "Bedroom" || pending.ZoneSelection != 1 || pending.Artwork != old {
+		t.Fatal("zone notice waited for new artwork or lost the fade source")
+	}
+	scenes := make(chan display.Update, 1)
+	display.Publish(scenes, pending)
+	display.Publish(scenes, c.scene())
+	if latest := <-scenes; latest.ZoneSelection != 1 || latest.Zone != "Bedroom" {
+		t.Fatal("coalescing snapshots lost the keyboard notice")
+	}
+	zones[1].State = roon.ZoneStatePaused
+	c.replace(zones)
+	if paused := c.scene(); paused.ZoneSelection != 1 || paused.Artwork != nil {
+		t.Fatal("paused zone must still carry the notice while blanking artwork")
+	}
+	c.cycle(display.EventPrevZone)
+	if c.scene().ZoneSelection != 2 {
+		t.Fatal("previous-zone navigation did not produce another notice")
+	}
+}

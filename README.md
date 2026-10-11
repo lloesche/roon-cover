@@ -11,7 +11,7 @@ go run ./cmd/roon-cover --window --show-all
 go run ./cmd/roon-cover --show-all --roon-zone "Bedroom"
 ```
 
-Omit `--window` for fullscreen. `--display 1` chooses the second desktop monitor (indices start at zero). Left/Right cycle zones; Q or Escape quits. Without `--roon-zone`, startup chooses the first playing zone in name order, or the first available zone if none is playing. Later playback changes do not switch zones. Pause and stop blank the display immediately.
+Omit `--window` for fullscreen. `--display 1` chooses the second desktop monitor (indices start at zero). Left/Right cycle zones and briefly show the selected zone for one second, even with text overlays disabled; Q or Escape quits. Without `--roon-zone`, startup chooses the first playing zone in name order, or the first available zone if none is playing. Later playback changes do not switch zones. Pause and stop blank the display immediately.
 
 On first use, enable **roon-cover** in **Roon → Settings → Extensions** from your phone, tablet, or computer. The display shows discovery, connection, and zone selection as they happen, then fades into the cover. Pairing needs no input on the display itself. Credentials live in the OS user configuration directory under `roon-cover/credentials.json`.
 

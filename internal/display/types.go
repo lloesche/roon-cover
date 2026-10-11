@@ -12,6 +12,9 @@ type Update struct {
 	Artwork    *Artwork
 	NoFade     bool
 	Status     *Status
+	// ZoneSelection increments on keyboard navigation. Retaining it in later
+	// snapshots prevents mailbox coalescing from losing the selection notice.
+	ZoneSelection uint64
 }
 
 // Status is a startup screen; it does not depend on metadata overlay flags.

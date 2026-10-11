@@ -48,6 +48,7 @@ type windowGame struct {
 	status           *Status
 	statusRows       []statusRow
 	statusFadeStart  time.Time
+	zoneSelection    uint64
 }
 
 func (d *Window) Run(ctx context.Context, updates <-chan Update) error {
@@ -141,7 +142,7 @@ func (g *windowGame) applyScene(scene Update) {
 	firstCover := g.cover.fadeInNext && scene.Artwork != nil
 	g.dirty = g.dirty || scene.Artwork != g.cover.asset
 	g.cover.set(scene.Artwork, scene.NoFade, g.now)
-	values := [4]string{"", "", "", scene.Zone}
+	values := [3]string{}
 	if scene.NowPlaying != nil {
 		values[0] = scene.NowPlaying.Title
 		if artist := strings.TrimSpace(scene.NowPlaying.Artist); artist != "" {
@@ -161,6 +162,36 @@ func (g *windowGame) applyScene(scene Update) {
 		if firstCover && value != "" && g.cover.duration > 0 {
 			g.lines[i].animation.fadeIn(g.now)
 		}
+	}
+	g.applyZoneLabel(scene)
+	if firstCover && scene.ZoneSelection == 0 {
+		g.lines[3].animation.fadeIn(g.now)
+	}
+}
+
+func (g *windowGame) applyZoneLabel(scene Update) {
+	zone := &g.lines[3].animation
+	name := strings.TrimSpace(scene.Zone)
+	if scene.ZoneSelection != 0 && scene.ZoneSelection != g.zoneSelection {
+		g.zoneSelection = scene.ZoneSelection
+		zone.show(name, g.now, time.Second)
+		g.dirty = true
+		return
+	}
+	if g.enabled[3] {
+		if name != zone.requested {
+			zone.hold = 5 * time.Second
+			zone.reveal = 0
+		}
+	} else {
+		// Ordinary snapshots must not dismiss a keyboard notice or extend it.
+		if name == zone.requested {
+			return
+		}
+		name = ""
+	}
+	if zone.set(name, g.now, scene.NoFade) {
+		g.dirty = true
 	}
 }
 

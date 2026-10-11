@@ -32,6 +32,7 @@ type Controller struct {
 	Power          func(context.Context, bool) error
 	zones          []roon.Zone
 	active         roon.ZoneID
+	zoneSelection  uint64
 	size           int
 	asset          *display.Artwork
 	lastScene      display.Update
@@ -108,16 +109,18 @@ func (c *Controller) cycle(kind display.EventKind) {
 		delta = -1
 	}
 	c.active = c.zones[(i+delta+len(c.zones))%len(c.zones)].ID
+	c.zoneSelection++
 }
 
 // scene never performs I/O. Loading is a transition within playback, not a
 // request to blank: retain the last complete scene until playback resumes.
 func (c *Controller) scene() display.Update {
 	z := c.SelectedZone()
-	scene := display.Update{Zone: z.Name}
+	scene := display.Update{Zone: z.Name, ZoneSelection: c.zoneSelection}
 	if z.State == roon.ZoneStateLoading && z.ID == c.sceneZone {
 		scene = c.lastScene
 		scene.Zone = z.Name
+		scene.ZoneSelection = c.zoneSelection
 		return scene
 	}
 	defer func() { c.lastScene, c.sceneZone = scene, z.ID }()
@@ -130,6 +133,7 @@ func (c *Controller) scene() display.Update {
 	if np.ImageKey != "" && (c.asset == nil || !strings.HasPrefix(c.asset.Key, string(np.ImageKey)+"/")) {
 		scene = c.lastScene
 		scene.Zone = z.Name
+		scene.ZoneSelection = c.zoneSelection
 		return scene
 	}
 	scene.NowPlaying = &display.Metadata{Title: np.Title, Artist: np.Artist, Album: np.Album}

@@ -18,6 +18,7 @@ type textTransition struct {
 	start                    time.Time
 	from                     float64
 	duration, hold           time.Duration
+	reveal                   time.Duration
 	expires                  time.Time
 	ease                     func(float64) float64
 	entry                    bool
@@ -31,7 +32,44 @@ func (t *textTransition) fadeIn(now time.Time) {
 	t.phase, t.from, t.start, t.entry = textPhaseFadeIn, 0, now, true
 }
 
+// show uses the configured easing with a quick reveal and the normal dismissal
+// fade. Retargeting an unfinished fade-out preserves its deadline and opacity.
+func (t *textTransition) show(value string, now time.Time, hold time.Duration) {
+	t.advance(now)
+	t.hold = hold
+	t.reveal = min(t.duration/2, 100*time.Millisecond)
+	t.expires = time.Time{}
+	if t.phase == textPhaseFadeOut && value != t.value && value != "" {
+		// Expiry may have been using the longer dismissal duration. Keep the
+		// visible opacity while turning it into a quick name replacement.
+		if t.target == "" {
+			t.from, t.start = t.opacity(now), now
+		}
+		t.target, t.requested = value, value
+		return
+	}
+	if value == t.value && t.phase != textPhaseFadeOut {
+		t.target, t.requested = value, value
+	} else {
+		wasEmpty := t.value == ""
+		// A keyboard selection can re-show a name after its previous expiry.
+		t.requested = ""
+		t.set(value, now, false)
+		if wasEmpty {
+			t.fadeIn(now)
+		}
+	}
+	if t.phase == textPhaseFadeIn {
+		t.scheduleExpiry(t.start)
+	} else if t.phase == textPhaseNone {
+		t.scheduleExpiry(now)
+	}
+}
+
 func (t *textTransition) phaseDuration() time.Duration {
+	if t.reveal > 0 && (t.phase == textPhaseFadeIn || t.target != "") {
+		return t.reveal
+	}
 	if t.entry {
 		return t.duration
 	}
@@ -84,14 +122,18 @@ func (t *textTransition) set(value string, now time.Time, immediate bool) bool {
 func (t *textTransition) scheduleExpiry(now time.Time) {
 	if t.hold > 0 && t.value != "" {
 		t.expires = now.Add(t.hold)
+		if t.phase == textPhaseFadeIn {
+			t.expires = t.expires.Add(t.phaseDuration())
+		}
 	}
 }
 func (t *textTransition) advance(now time.Time) bool {
 	changed := t.phase != textPhaseNone
 	if t.phase != textPhaseNone && now.Sub(t.start) >= t.phaseDuration() {
 		if t.phase == textPhaseFadeOut {
+			end := t.start.Add(t.phaseDuration())
 			t.value = t.target
-			t.start = t.start.Add(t.duration / 2)
+			t.start = end
 			t.from = 0
 			t.phase = textPhaseFadeIn
 			t.scheduleExpiry(t.start)
