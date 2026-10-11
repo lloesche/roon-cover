@@ -33,22 +33,21 @@ type textLine struct {
 	rendered  string
 }
 type windowGame struct {
-	config                 *Window
-	ctx                    context.Context
-	scenes                 <-chan Update
-	cover                  coverLayer
-	text                   *textEngine
-	lines                  [4]textLine
-	enabled                [4]bool
-	width, height          int
-	scale                  float64
-	now                    time.Time
-	timer                  *time.Timer
-	err                    error
-	presented, minimumMode bool
-	status                 *Status
-	statusRows             []statusRow
-	statusFadeStart        time.Time
+	config           *Window
+	ctx              context.Context
+	scenes           <-chan Update
+	cover            coverLayer
+	text             *textEngine
+	lines            [4]textLine
+	enabled          [4]bool
+	width, height    int
+	scale            float64
+	now              time.Time
+	err              error
+	presented, dirty bool
+	status           *Status
+	statusRows       []statusRow
+	statusFadeStart  time.Time
 }
 
 func (d *Window) Run(ctx context.Context, updates <-chan Update) error {
@@ -75,34 +74,10 @@ func (d *Window) Run(ctx context.Context, updates <-chan Update) error {
 		ebiten.SetCursorMode(ebiten.CursorModeHidden)
 	}
 	ebiten.SetRunnableOnUnfocused(true)
-	// Sleep between external updates and animation/overlay deadlines.
-	// Bootstrap a frame before entering event-driven mode: the application
-	// needs Layout's size before it can publish its first artwork request.
-	ebiten.SetFPSMode(ebiten.FPSModeVsyncOn)
-	localCtx, cancel := context.WithCancel(ctx)
-	defer cancel()
-	scenes := make(chan Update, 1)
-	done := make(chan struct{})
-	go func() {
-		defer close(done)
-		for {
-			select {
-			case <-localCtx.Done():
-				ebiten.ScheduleFrame()
-				return
-			case scene, ok := <-updates:
-				if !ok {
-					cancel()
-					ebiten.ScheduleFrame()
-					return
-				}
-				Publish(scenes, scene)
-				ebiten.ScheduleFrame()
-			}
-		}
-	}()
-	defer func() { cancel(); <-done }()
-	g := &windowGame{config: d, ctx: localCtx, scenes: scenes, scale: 1, enabled: [4]bool{d.ShowTitle, d.ShowArtist, d.ShowAlbum, d.ShowZone}}
+	// Retain the last frame and leave it untouched while the scene is static.
+	ebiten.SetVsyncEnabled(true)
+	ebiten.SetScreenClearedEveryFrame(false)
+	g := &windowGame{config: d, ctx: ctx, scenes: updates, scale: 1, dirty: true, enabled: [4]bool{d.ShowTitle, d.ShowArtist, d.ShowAlbum, d.ShowZone}}
 	g.cover = coverLayer{duration: time.Duration(d.FadeMS) * time.Millisecond, ease: ease, width: 800, height: 800}
 	defer g.close()
 	// Startup instructions must be visible even when metadata overlays are off.
@@ -118,9 +93,6 @@ func (d *Window) Run(ctx context.Context, updates <-chan Update) error {
 }
 func (g *windowGame) close() {
 	g.setStatus(nil, time.Time{})
-	if g.timer != nil {
-		g.timer.Stop()
-	}
 	g.cover.close()
 	for i := range g.lines {
 		if g.lines[i].image != nil {
@@ -132,48 +104,22 @@ func (g *windowGame) close() {
 	}
 }
 func (g *windowGame) Update() error {
-	if g.presented && !g.minimumMode {
-		ebiten.SetFPSMode(ebiten.FPSModeVsyncOffMinimum)
-		g.minimumMode = true
-	}
 	if g.err != nil {
 		return g.err
 	}
 	if g.ctx.Err() != nil || inpututil.IsKeyJustPressed(ebiten.KeyEscape) || inpututil.IsKeyJustPressed(ebiten.KeyQ) {
 		return ebiten.Termination
 	}
-	g.now = time.Now()
+	g.advanceAnimations(time.Now())
 	select {
-	case scene := <-g.scenes:
-		g.setStatus(scene.Status, g.now)
-		firstCover := g.cover.fadeInNext && scene.Artwork != nil
-		g.cover.set(scene.Artwork, scene.NoFade, g.now)
-		values := [4]string{"", "", "", scene.Zone}
-		if scene.NowPlaying != nil {
-			values[0] = scene.NowPlaying.Title
-			if artist := strings.TrimSpace(scene.NowPlaying.Artist); artist != "" {
-				values[1] = "Performed by " + artist
-			}
-			if album := strings.TrimSpace(scene.NowPlaying.Album); album != "" {
-				values[2] = "On " + album
-			}
+	case scene, ok := <-g.scenes:
+		if !ok {
+			return ebiten.Termination
 		}
-		for i, value := range values {
-			if !g.enabled[i] {
-				value = ""
-			}
-			g.lines[i].animation.set(strings.TrimSpace(value), g.now, scene.NoFade)
-			if firstCover && value != "" && g.cover.duration > 0 {
-				g.lines[i].animation.phase = textPhaseFadeIn
-				g.lines[i].animation.from = 0
-				g.lines[i].animation.start = g.now
-				g.lines[i].animation.entry = true
-			}
-		}
+		g.applyScene(scene)
 	default:
 	}
 	if g.status != nil {
-		g.schedule()
 		return nil
 	}
 	for _, key := range []struct {
@@ -187,48 +133,69 @@ func (g *windowGame) Update() error {
 			}
 		}
 	}
-	for i := range g.lines {
-		g.lines[i].animation.advance(g.now)
-	}
-	g.schedule()
 	return nil
 }
-func (g *windowGame) schedule() {
-	delay := time.Duration(0)
-	if g.status != nil && g.status.FadeOut && g.now.Sub(g.statusFadeStart) < g.cover.duration {
-		delay = time.Second / 60
-	}
-	if g.cover.active(g.now) {
-		delay = time.Second / 60
-	}
-	for _, row := range g.statusRows {
-		if g.now.Sub(row.start) < g.cover.duration {
-			delay = time.Second / 60
+
+func (g *windowGame) applyScene(scene Update) {
+	g.setStatus(scene.Status, g.now)
+	firstCover := g.cover.fadeInNext && scene.Artwork != nil
+	g.dirty = g.dirty || scene.Artwork != g.cover.asset
+	g.cover.set(scene.Artwork, scene.NoFade, g.now)
+	values := [4]string{"", "", "", scene.Zone}
+	if scene.NowPlaying != nil {
+		values[0] = scene.NowPlaying.Title
+		if artist := strings.TrimSpace(scene.NowPlaying.Artist); artist != "" {
+			values[1] = "Performed by " + artist
+		}
+		if album := strings.TrimSpace(scene.NowPlaying.Album); album != "" {
+			values[2] = "On " + album
 		}
 	}
-	for i := range g.lines {
-		a := &g.lines[i].animation
-		if a.phase != textPhaseNone {
-			delay = time.Second / 60
+	for i, value := range values {
+		if !g.enabled[i] {
+			value = ""
 		}
-		if !a.expires.IsZero() {
-			d := max(time.Millisecond, a.expires.Sub(g.now))
-			if delay == 0 || d < delay {
-				delay = d
+		if g.lines[i].animation.set(strings.TrimSpace(value), g.now, scene.NoFade) {
+			g.dirty = true
+		}
+		if firstCover && value != "" && g.cover.duration > 0 {
+			g.lines[i].animation.fadeIn(g.now)
+		}
+	}
+}
+
+func (g *windowGame) advanceAnimations(now time.Time) {
+	// Sample both clocks so crossing an animation deadline still paints its
+	// final frame. Multiple Update calls before Draw preserve the dirty flag.
+	g.dirty = g.dirty || g.animating(g.now) || g.animating(now)
+	g.now = now
+	if g.status == nil {
+		for i := range g.lines {
+			if g.lines[i].animation.advance(now) {
+				g.dirty = true
 			}
 		}
 	}
-	if g.timer != nil {
-		g.timer.Stop()
+}
+func (g *windowGame) animating(now time.Time) bool {
+	if g.status != nil {
+		if g.status.FadeOut {
+			return now.Sub(g.statusFadeStart) < g.cover.duration
+		}
+		for _, row := range g.statusRows {
+			if now.Sub(row.start) < g.cover.duration {
+				return true
+			}
+		}
+		return false
 	}
-	if delay > 0 {
-		g.timer = time.AfterFunc(delay, ebiten.ScheduleFrame)
-	}
+	return g.cover.active(now)
 }
 func (g *windowGame) Layout(w, h int) (int, int) {
 	scale := ebiten.Monitor().DeviceScaleFactor()
 	width, height := max(1, int(math.Round(float64(w)*scale))), max(1, int(math.Round(float64(h)*scale)))
 	if width != g.width || height != g.height || scale != g.scale {
+		g.dirty = true
 		g.clearStatusImage()
 		g.width = width
 		g.height = height
@@ -249,7 +216,10 @@ func (g *windowGame) Layout(w, h int) (int, int) {
 	return width, height
 }
 func (g *windowGame) Draw(screen *ebiten.Image) {
-	defer func() { g.presented = true }()
+	if g.presented && !g.dirty {
+		return
+	}
+	defer func() { g.presented = true; g.dirty = false }()
 	screen.Fill(color.Black)
 	if g.status != nil {
 		g.drawStatus(screen)
@@ -277,7 +247,6 @@ func (g *windowGame) Draw(screen *ebiten.Image) {
 				pixels, missing, err := g.text.raster(line.animation.value, max(1, g.width-int(2*pad)), scale)
 				if err != nil {
 					g.err = err
-					ebiten.ScheduleFrame()
 					return
 				}
 				if missing > 0 {
