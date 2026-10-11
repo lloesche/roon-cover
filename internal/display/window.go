@@ -179,7 +179,10 @@ func (g *windowGame) applyZoneLabel(scene Update) {
 		return
 	}
 	if g.enabled[3] {
-		zone.hold = 5 * time.Second
+		if name != zone.requested {
+			zone.hold = 5 * time.Second
+			zone.reveal = 0
+		}
 	} else {
 		// Ordinary snapshots must not dismiss a keyboard notice or extend it.
 		if name == zone.requested {
