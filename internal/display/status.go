@@ -48,6 +48,10 @@ func statusLines(status *Status) []string {
 }
 
 func (g *windowGame) setStatus(status *Status, now time.Time) {
+	if status == nil && g.status == nil {
+		return
+	}
+	g.dirty = true
 	if status != nil && status.FadeOut && (g.status == nil || !g.status.FadeOut) {
 		g.statusFadeStart = now
 		g.cover.fadeInNext = true
@@ -115,7 +119,6 @@ func (g *windowGame) drawStatus(screen *ebiten.Image) {
 			pixels, _, err := g.text.raster(row.value, max(1, width-(cursorX-x)), scale)
 			if err != nil {
 				g.err = err
-				ebiten.ScheduleFrame()
 				return
 			}
 			row.image = ebiten.NewImageFromImage(pixels)

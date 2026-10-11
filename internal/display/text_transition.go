@@ -15,6 +15,14 @@ type textTransition struct {
 	entry                    bool
 }
 
+// fadeIn synchronizes the first metadata appearance with the full cover fade.
+func (t *textTransition) fadeIn(now time.Time) {
+	if t.value == "" || t.duration <= 0 {
+		return
+	}
+	t.phase, t.from, t.start, t.entry = textPhaseFadeIn, 0, now, true
+}
+
 func (t *textTransition) phaseDuration() time.Duration {
 	if t.entry {
 		return t.duration
