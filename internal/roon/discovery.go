@@ -265,9 +265,6 @@ func (c *Client) DiscoverWithOptions(ctx context.Context, opt discoverOptions) (
 	return out, nil
 }
 
-// Legacy helpers removed: we now keep sender sockets open so we can receive replies
-// on the sender's ephemeral port (matches node-roon-api behavior).
-
 func randomUUIDLike() (string, error) {
 	// node-uuid v4 style; we only need uniqueness for _tid.
 	var b [16]byte

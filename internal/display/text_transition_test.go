@@ -67,3 +67,18 @@ func TestExpiryOnRepeatedUpdateIsReported(t *testing.T) {
 		t.Fatal("expiry must invalidate the scene even with unchanged metadata")
 	}
 }
+
+func TestFirstMetadataFadeUsesFullCoverDuration(t *testing.T) {
+	now := time.Unix(1, 0)
+	tr := transition()
+	tr.set("Title", now, true)
+	tr.fadeIn(now)
+	tr.advance(now.Add(tr.duration / 2))
+	if tr.opacity(now.Add(tr.duration/2)) != .5 {
+		t.Fatal("initial metadata fade did not match the cover duration")
+	}
+	tr.advance(now.Add(tr.duration))
+	if tr.phase != textPhaseNone || tr.opacity(now.Add(tr.duration)) != 1 {
+		t.Fatal("first metadata fade never settled")
+	}
+}

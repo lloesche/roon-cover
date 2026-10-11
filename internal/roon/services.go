@@ -78,12 +78,6 @@ func (s *session) registerPairingService() {
 			}
 			ps.mu.Unlock()
 
-			// Notify the waiter (Pair()) without ever blocking. Closing a channel provides
-			// synchronization so the caller will observe the updated creds.PairedCoreID.
-			if s.pairedSignal != nil {
-				s.pairedOnce.Do(func() { close(s.pairedSignal) })
-			}
-
 			return req.SendComplete("Success", nil)
 
 		default:

@@ -180,3 +180,55 @@ func TestStartupLineFadePreservesEarlierText(t *testing.T) {
 		t.Fatal("first cover fade never finished")
 	}
 }
+
+func TestRetainedFrameSkipsStaticDrawingAndPaintsFinalFade(t *testing.T) {
+	if os.Getenv("ROON_COVER_GPU_TESTS") != "1" {
+		t.Skip("set ROON_COVER_GPU_TESTS=1 for GPU checks")
+	}
+	pixels := image.NewNRGBA(image.Rect(0, 0, 4, 4))
+	for y := 0; y < 4; y++ {
+		for x := 0; x < 4; x++ {
+			pixels.SetNRGBA(x, y, color.NRGBA{255, 255, 255, 255})
+		}
+	}
+	now := time.Unix(1, 0)
+	g := windowGame{now: now, cover: coverLayer{width: 4, height: 4, duration: time.Second, ease: func(x float64) float64 { return x }}}
+	defer g.close()
+	out := ebiten.NewImage(4, 4)
+	defer out.Deallocate()
+	g.cover.set(&Artwork{Key: "white", Pixels: pixels}, true, now)
+	g.Draw(out)
+	// A sentinel makes an unintended clear or draw observable through GPU readback.
+	out.Fill(color.NRGBA{R: 37, A: 255})
+	g.advanceAnimations(now.Add(time.Second))
+	g.applyScene(Update{Artwork: g.cover.asset})
+	g.Draw(out)
+	read := make([]byte, 64)
+	out.ReadPixels(read)
+	if read[0] != 37 || read[1] != 0 {
+		t.Fatal("static scene performed drawing work")
+	}
+	g.dirty = true
+	g.Draw(out)
+	out.ReadPixels(read)
+	if read[0] != 255 || read[1] != 255 {
+		t.Fatal("dirty scene did not repaint")
+	}
+	black := image.NewNRGBA(image.Rect(0, 0, 4, 4))
+	for y := 0; y < 4; y++ {
+		for x := 0; x < 4; x++ {
+			black.SetNRGBA(x, y, color.NRGBA{A: 255})
+		}
+	}
+	g.cover.set(&Artwork{Key: "black", Pixels: black}, false, g.now)
+	g.advanceAnimations(g.now.Add(time.Second))
+	g.Draw(out)
+	out.ReadPixels(read)
+	if read[0] != 0 || g.cover.previous != nil {
+		t.Fatal("final cover frame or texture cleanup was skipped")
+	}
+	g.advanceAnimations(g.now.Add(time.Second))
+	if g.dirty {
+		t.Fatal("completed fade kept requesting redraws")
+	}
+}

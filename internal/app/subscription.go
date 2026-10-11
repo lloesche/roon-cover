@@ -3,13 +3,19 @@ package app
 import (
 	"context"
 	"errors"
+	"fmt"
+	"net"
+	"roon-cover/internal/display"
 	"roon-cover/internal/roon"
+	"strings"
 	"time"
 )
 
 type subscriptionEvent struct {
-	zones []roon.Zone
-	err   error
+	core   roon.Core
+	status *display.Status
+	zones  []roon.Zone
+	err    error
 }
 
 // A single ordered mailbox prevents an old snapshot from reviving a lost session.
@@ -31,13 +37,29 @@ func publishSubscription(ch chan subscriptionEvent, event subscriptionEvent) {
 func (c *Controller) subscribe(ctx context.Context, updates chan subscriptionEvent) {
 	delay := time.Second
 	session := c.InitialSession
+	core := c.Core
+	failures := 0
 	for {
 		started := time.Now()
 		var err error
 		if session == nil {
-			session, err = c.Source.OpenSession(ctx, c.Core, nil)
+			if failures >= 2 {
+				if _, _, explicit := net.SplitHostPort(strings.TrimSpace(c.Options.CoreSelector)); explicit != nil {
+					found, discoveryErr := rediscoverCore(ctx, c.Source, core, c.Options.CoreSelector)
+					if discoveryErr == nil {
+						core = found
+					} else {
+						c.Log.Warn("Roon rediscovery failed; retrying", "error", discoveryErr)
+					}
+				}
+			}
+			session, err = c.Source.OpenSession(ctx, core, func() {
+				publishSubscription(updates, subscriptionEvent{err: errors.New("roon: authorization required"), status: &display.Status{Title: "Connect to " + core.Name, Detail: "In Roon, open Settings → Extensions", Hint: "Enable roon-cover to continue."}})
+			})
 			if err == nil {
-				publishSubscription(updates, subscriptionEvent{zones: session.Zones})
+				core = session.Core
+				failures = 0
+				publishSubscription(updates, subscriptionEvent{core: core, zones: session.Zones})
 			}
 		}
 		if err == nil {
@@ -51,6 +73,7 @@ func (c *Controller) subscribe(ctx context.Context, updates chan subscriptionEve
 		if err == nil {
 			err = errors.New("roon: subscription ended")
 		}
+		failures++
 		publishSubscription(updates, subscriptionEvent{err: err})
 		if time.Since(started) > 30*time.Second {
 			delay = time.Second
@@ -78,7 +101,35 @@ func consumeSession(ctx context.Context, session *roon.Session, updates chan sub
 				return errors.New("roon: zone subscription disconnected")
 			default:
 			}
-			publishSubscription(updates, subscriptionEvent{zones: update.Zones})
+			publishSubscription(updates, subscriptionEvent{core: session.Core, zones: update.Zones})
 		}
 	}
+}
+
+// Prefer the stable identity, then a unique same-name replacement after a Core
+// reinstall. Never silently select a different server from a discovery list.
+func rediscoverCore(ctx context.Context, source Source, previous roon.Core, selector string) (roon.Core, error) {
+	cores, err := source.Discover(ctx)
+	if err != nil {
+		return roon.Core{}, err
+	}
+	for _, core := range cores {
+		if previous.ID != "" && core.ID == previous.ID {
+			return core, nil
+		}
+	}
+	name := strings.TrimSpace(selector)
+	if name == "" {
+		name = previous.Name
+	}
+	var matches []roon.Core
+	for _, core := range cores {
+		if strings.EqualFold(strings.TrimSpace(core.Name), name) {
+			matches = append(matches, core)
+		}
+	}
+	if len(matches) == 1 {
+		return matches[0], nil
+	}
+	return roon.Core{}, fmt.Errorf("could not uniquely rediscover Roon Core %q", name)
 }

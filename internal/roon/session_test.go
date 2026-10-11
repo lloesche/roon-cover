@@ -2,6 +2,7 @@ package roon
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"io"
 	"log/slog"
@@ -9,6 +10,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"path/filepath"
 	"strconv"
 	"sync"
 	"sync/atomic"
@@ -41,7 +43,7 @@ func (m *memoryCredentials) Save(_ context.Context, _ Core, value Credentials) e
 	return nil
 }
 
-func sessionServer(t *testing.T, ctx context.Context, approvalDelay time.Duration, revoked <-chan struct{}, connections, registrations *atomic.Int32) Core {
+func sessionServer(t *testing.T, ctx context.Context, approvalDelay time.Duration, revoked <-chan struct{}, connections, registrations *atomic.Int32, onRegister ...func(registryRegisterRequest)) Core {
 	t.Helper()
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		ws, err := websocket.Accept(w, r, nil)
@@ -66,6 +68,14 @@ func sessionServer(t *testing.T, ctx context.Context, approvalDelay time.Duratio
 			case svcRegistry + "/info":
 				response, err = encodeMooComplete(frame.RequestID, "Success", registryInfoResponse{CoreID: "test-core"})
 			case svcRegistry + "/register":
+				var request registryRegisterRequest
+				if err := json.Unmarshal(frame.BodyRaw, &request); err != nil {
+					t.Error(err)
+					return
+				}
+				for _, observe := range onRegister {
+					observe(request)
+				}
 				registrations.Add(1)
 				registrationID = frame.RequestID
 				timer := time.NewTimer(approvalDelay)
@@ -161,5 +171,38 @@ func TestSessionAuthorizationCanBeCancelled(t *testing.T) {
 	_, err := NewClient(Config{}, WithCredentialStore(&memoryCredentials{})).OpenSession(ctx, core, cancel)
 	if !errors.Is(err, context.Canceled) {
 		t.Fatalf("cancellation: %v", err)
+	}
+}
+
+func TestSessionMigratesOnlyMatchingExplicitAddressCredentials(t *testing.T) {
+	for _, paired := range []CoreID{"test-core", "other-core"} {
+		t.Run(string(paired), func(t *testing.T) {
+			ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+			defer cancel()
+			var connections, registrations atomic.Int32
+			var presentedToken atomic.Value
+			core := sessionServer(t, ctx, 0, nil, &connections, &registrations, func(request registryRegisterRequest) { presentedToken.Store(request.Token) })
+			core.Name = net.JoinHostPort(core.Host, strconv.Itoa(core.Port))
+			store := &fileCredentialStore{path: filepath.Join(t.TempDir(), "credentials.json")}
+			if err := store.Save(ctx, core, Credentials{RegistryToken: "legacy-token", PairedCoreID: paired}); err != nil {
+				t.Fatal(err)
+			}
+			session, err := NewClient(Config{}, WithCredentialStore(store)).OpenSession(ctx, core, nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer session.Close()
+			expected := ""
+			if paired == "test-core" {
+				expected = "legacy-token"
+			}
+			if presentedToken.Load() != expected {
+				t.Fatalf("presented token %q, expected %q", presentedToken.Load(), expected)
+			}
+			value, found, err := store.Load(ctx, session.Core)
+			if err != nil || !found || value.CoreKey != "test-core" || value.PairedCoreID != "test-core" {
+				t.Fatalf("canonical credentials not saved: %v", err)
+			}
+		})
 	}
 }

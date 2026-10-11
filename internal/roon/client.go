@@ -1,14 +1,16 @@
 package roon
 
 import (
-	"context"
 	"log/slog"
+	"net/http"
+	"time"
 )
 
 type Client struct {
-	store CredentialStore
-	log   *slog.Logger
-	cfg   Config
+	imageClient *http.Client
+	store       CredentialStore
+	log         *slog.Logger
+	cfg         Config
 }
 
 type Option func(*Client)
@@ -23,8 +25,9 @@ func WithLogger(l *slog.Logger) Option {
 
 func NewClient(cfg Config, opts ...Option) *Client {
 	c := &Client{
-		log: slog.Default(),
-		cfg: cfg,
+		imageClient: &http.Client{Timeout: 10 * time.Second},
+		log:         slog.Default(),
+		cfg:         cfg,
 	}
 	c.withDefaultLogger()
 	c.cfg = applyConfigDefaults(c.cfg)
@@ -32,15 +35,6 @@ func NewClient(cfg Config, opts ...Option) *Client {
 		opt(c)
 	}
 	return c
-}
-
-func (c *Client) Pair(ctx context.Context, core Core) (Credentials, error) {
-	s, err := c.connectAndRegister(ctx, core, nil)
-	if err != nil {
-		return Credentials{}, err
-	}
-	defer s.conn.Close()
-	return s.credentials(), nil
 }
 
 type ImageFetchOptions struct {

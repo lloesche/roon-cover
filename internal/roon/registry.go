@@ -2,9 +2,11 @@ package roon
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
+	"net"
 	"sync"
 	"time"
 )
@@ -52,10 +54,8 @@ type session struct {
 	core Core
 	conn *mooConn
 
-	log          *slog.Logger
-	pairedSignal chan struct{}
-	pairedOnce   sync.Once
-	creds        *Credentials
+	log   *slog.Logger
+	creds *Credentials
 }
 
 func (c *Client) connectAndRegister(ctx context.Context, core Core, onAuthorization func()) (*session, error) {
@@ -77,7 +77,7 @@ func (c *Client) connectAndRegister(ctx context.Context, core Core, onAuthorizat
 		if f.ResponseName != "Success" {
 			return fmt.Errorf("registry info: %s", f.ResponseName)
 		}
-		return jsonUnmarshal(f.BodyRaw, &info)
+		return json.Unmarshal(f.BodyRaw, &info)
 	})
 	if err != nil {
 		return nil, err
@@ -88,16 +88,29 @@ func (c *Client) connectAndRegister(ctx context.Context, core Core, onAuthorizat
 	if core.ID != "" && core.ID != CoreID(info.CoreID) {
 		return nil, errors.New("roon: endpoint belongs to a different core")
 	}
+	lookupCore := core
 	core.ID = CoreID(info.CoreID)
 	store, err := c.credentialStore()
 	if err != nil {
 		return nil, err
 	}
-	creds, _, err := store.Load(ctx, core)
+	creds, found, err := store.Load(ctx, core)
 	if err != nil {
 		return nil, err
 	}
-	s := &session{core: core, conn: conn, log: c.log, pairedSignal: make(chan struct{}), creds: &creds}
+	// Older explicit-address configurations saved under the supplied name.
+	// Migrate only credentials that identify this exact Core.
+	_, _, explicitErr := net.SplitHostPort(lookupCore.Name)
+	if !found && lookupCore.ID == "" && explicitErr == nil {
+		legacy, ok, loadErr := store.Load(ctx, lookupCore)
+		if loadErr != nil {
+			return nil, loadErr
+		}
+		if ok && legacy.PairedCoreID == core.ID {
+			creds = legacy
+		}
+	}
+	s := &session{core: core, conn: conn, log: c.log, creds: &creds}
 	s.registerPingService()
 	s.registerPairingService()
 	request := registryRegisterRequest{
@@ -114,7 +127,7 @@ func (c *Client) connectAndRegister(ctx context.Context, core Core, onAuthorizat
 			return fmt.Errorf("roon: registration ended: %s", f.ResponseName)
 		}
 		var reg registryRegistered
-		if err := jsonUnmarshal(f.BodyRaw, &reg); err != nil {
+		if err := json.Unmarshal(f.BodyRaw, &reg); err != nil {
 			return err
 		}
 		if reg.CoreID != string(core.ID) || reg.Token == "" {
@@ -164,5 +177,4 @@ func (c *Client) connectAndRegister(ctx context.Context, core Core, onAuthorizat
 	}
 }
 
-func (s *session) credentials() Credentials { s.mu.Lock(); defer s.mu.Unlock(); return *s.creds }
-func (s *session) coreSnapshot() Core       { s.mu.Lock(); defer s.mu.Unlock(); return s.core }
+func (s *session) coreSnapshot() Core { s.mu.Lock(); defer s.mu.Unlock(); return s.core }

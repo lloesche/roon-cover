@@ -12,8 +12,8 @@ import (
 const MaxArtworkBytes = 24 << 20
 const MaxArtworkPixels = 16 << 20
 
-// DecodeArtwork is CPU-only and must run off the SDL thread. NRGBA stores the
-// straight alpha expected by SDL; image.RGBA would darken transparent PNG edges.
+// DecodeArtwork runs in the artwork worker to keep image decoding off the graphics
+// thread. NRGBA preserves straight alpha for texture upload.
 func DecodeArtwork(key string, data []byte) (*Artwork, error) {
 	if len(data) > MaxArtworkBytes {
 		return nil, fmt.Errorf("artwork exceeds %d bytes", MaxArtworkBytes)

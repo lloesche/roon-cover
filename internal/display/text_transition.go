@@ -2,6 +2,14 @@ package display
 
 import "time"
 
+type textPhase int
+
+const (
+	textPhaseNone textPhase = iota
+	textPhaseFadeOut
+	textPhaseFadeIn
+)
+
 // textTransition is independent of textures and samples only its supplied clock.
 // Duration is the total fade-out/fade-in duration of a replacement.
 type textTransition struct {
@@ -13,6 +21,14 @@ type textTransition struct {
 	expires                  time.Time
 	ease                     func(float64) float64
 	entry                    bool
+}
+
+// fadeIn synchronizes the first metadata appearance with the full cover fade.
+func (t *textTransition) fadeIn(now time.Time) {
+	if t.value == "" || t.duration <= 0 {
+		return
+	}
+	t.phase, t.from, t.start, t.entry = textPhaseFadeIn, 0, now, true
 }
 
 func (t *textTransition) phaseDuration() time.Duration {

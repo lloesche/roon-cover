@@ -35,4 +35,8 @@ type NowPlaying struct {
 	Album  string
 
 	ImageKey ImageKey
+
+	// Seconds; nil means the Core did not provide a value (e.g. live radio).
+	SeekPosition *float64
+	Length       *float64
 }

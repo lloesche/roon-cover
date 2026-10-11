@@ -1,9 +1,7 @@
 package display
 
 import (
-	"image"
 	"image/color"
-	"image/draw"
 	"math"
 	"time"
 
@@ -48,6 +46,10 @@ func statusLines(status *Status) []string {
 }
 
 func (g *windowGame) setStatus(status *Status, now time.Time) {
+	if status == nil && g.status == nil {
+		return
+	}
+	g.dirty = true
 	if status != nil && status.FadeOut && (g.status == nil || !g.status.FadeOut) {
 		g.statusFadeStart = now
 		g.cover.fadeInNext = true
@@ -115,7 +117,6 @@ func (g *windowGame) drawStatus(screen *ebiten.Image) {
 			pixels, _, err := g.text.raster(row.value, max(1, width-(cursorX-x)), scale)
 			if err != nil {
 				g.err = err
-				ebiten.ScheduleFrame()
 				return
 			}
 			row.image = ebiten.NewImageFromImage(pixels)
@@ -139,26 +140,4 @@ func (g *windowGame) drawStatus(screen *ebiten.Image) {
 		default:
 		}
 	}
-}
-
-// Static rendering also supports visual checks without a graphics session.
-func renderStatus(text *textEngine, status Status, width, height int, scale float64) (*image.NRGBA, error) {
-	canvas := image.NewNRGBA(image.Rect(0, 0, max(1, width), max(1, height)))
-	draw.Draw(canvas, canvas.Bounds(), image.NewUniform(color.NRGBA{R: 18, G: 22, B: 30, A: 255}), image.Point{}, draw.Src)
-	lines := statusLines(&status)
-	x, y, lineWidth, lineHeight, textScale := statusLayout(text, width, height, scale, statusLineCount(&status))
-	cursorX, cursorY := x, y
-	for i, value := range lines {
-		if i > 0 && !statusInline(&status, i) {
-			cursorX = x
-			cursorY += lineHeight
-		}
-		line, _, err := text.raster(value, max(1, lineWidth-(cursorX-x)), textScale)
-		if err != nil {
-			return nil, err
-		}
-		draw.Draw(canvas, line.Bounds().Add(image.Pt(cursorX, cursorY)), line, line.Bounds().Min, draw.Over)
-		cursorX += line.Bounds().Dx() + int(math.Round(text.size*textScale*.2))
-	}
-	return canvas, nil
 }

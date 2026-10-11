@@ -179,3 +179,5 @@ func TestLoadingRetainsSceneButPauseStillBlanks(t *testing.T) {
 		t.Fatal("loading another zone must not resurrect an old scene")
 	}
 }
+
+func (s *source) Discover(context.Context) ([]roon.Core, error) { return nil, nil }
