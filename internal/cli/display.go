@@ -73,19 +73,26 @@ func runKiosk(cmd *cobra.Command) error {
 	go func() {
 		defer close(updates)
 		var controller *app.Controller
+		var session *roon.Session
+		defer func() {
+			if session != nil {
+				session.Close()
+			}
+		}()
 		err := runStartup(ctx, updates, 5*time.Second, func(status func(display.Status)) error {
+			if session != nil {
+				session.Close()
+				session = nil
+			}
 			client := roon.NewClient(roon.Config{DisplayName: "roon-cover"}, roon.WithLogger(l))
-			core, err := ensureCoreAndPaired(ctx, cmd, client, status)
+			opened, err := openCoreSession(ctx, cmd, client, status)
 			if err != nil {
 				return err
 			}
-			zones, err := client.GetZones(ctx, core)
-			if err != nil {
-				return err
-			}
+			session = opened
 			status(display.Status{Title: "connected", Hold: 700 * time.Millisecond, AppendInline: true})
 			status(display.Status{Title: "Choosing listening zone…", Hold: 300 * time.Millisecond})
-			controller = &app.Controller{Source: client, Core: core, Log: l, Options: app.Options{Zone: configFor(cmd).GetString("roon.zone"), SleepAfter: time.Duration(sleepIdleSec) * time.Second}, Power: func(ctx context.Context, sleep bool) error {
+			controller = &app.Controller{Source: client, Core: session.Core, InitialSession: session, Log: l, Options: app.Options{Zone: configFor(cmd).GetString("roon.zone"), SleepAfter: time.Duration(sleepIdleSec) * time.Second}, Power: func(ctx context.Context, sleep bool) error {
 				if sleep {
 					return powerCtl.Sleep(ctx)
 				}
@@ -94,7 +101,7 @@ func runKiosk(cmd *cobra.Command) error {
 			if configFor(cmd).GetBool("download.to_temp") {
 				controller.Options.SaveArtwork = func(zone string, data []byte, mime string) { writeCoverBytesToTemp(l, zone, data, mime) }
 			}
-			if err := controller.Initialize(zones); err != nil {
+			if err := controller.Initialize(session.Zones); err != nil {
 				return err
 			}
 			zone := controller.SelectedZone()

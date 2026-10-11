@@ -2,9 +2,7 @@ package roon
 
 import (
 	"context"
-	"errors"
 	"log/slog"
-	"time"
 )
 
 type Client struct {
@@ -37,35 +35,12 @@ func NewClient(cfg Config, opts ...Option) *Client {
 }
 
 func (c *Client) Pair(ctx context.Context, core Core) (Credentials, error) {
-	// Pair is invoked when we don't have credentials yet; it will:
-	// - connect + registry/register (obtains registry token)
-	// - wait until user accepts the extension (pairing:1/pair)
-	creds := Credentials{CoreKey: coreKey(core)}
-
-	s, err := c.connectAndRegister(ctx, core, &creds)
+	s, err := c.connectAndRegister(ctx, core, nil)
 	if err != nil {
 		return Credentials{}, err
 	}
 	defer s.conn.Close()
-
-	if current := s.credentials(); current.PairedCoreID != "" {
-		return current, nil
-	}
-	c.log.Info("waiting for roon pairing approval", "core", core.Name)
-	waitCtx, cancel := context.WithTimeout(ctx, 5*time.Minute)
-	defer cancel()
-	select {
-	case <-waitCtx.Done():
-		return Credentials{}, waitCtx.Err()
-	case <-s.conn.closed:
-		return Credentials{}, errors.New("roon: disconnected while waiting for pairing")
-	case <-s.pairedSignal:
-		current := s.credentials()
-		if current.PairedCoreID == "" {
-			return Credentials{}, errors.New("pairing signaled without a core")
-		}
-		return current, nil
-	}
+	return s.credentials(), nil
 }
 
 type ImageFetchOptions struct {

@@ -13,9 +13,9 @@ import (
 
 type blockedArtworkSource struct{ started, canceled chan struct{} }
 
-func (s *blockedArtworkSource) SubscribeZones(ctx context.Context, _ roon.Core, _ func(roon.ZoneUpdate) error) error {
+func (s *blockedArtworkSource) OpenSession(ctx context.Context, _ roon.Core, _ func()) (*roon.Session, error) {
 	<-ctx.Done()
-	return nil
+	return nil, ctx.Err()
 }
 func (s *blockedArtworkSource) FetchImage(ctx context.Context, _ roon.Core, key roon.ImageKey, _ roon.ImageFetchOptions) ([]byte, string, error) {
 	if key == "slow" {
