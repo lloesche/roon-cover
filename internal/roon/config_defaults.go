@@ -16,5 +16,8 @@ func applyConfigDefaults(cfg Config) Config {
 	if cfg.Email == "" {
 		cfg.Email = "n/a"
 	}
+	if cfg.Website == "" {
+		cfg.Website = "https://github.com/lloesche/roon-cover"
+	}
 	return cfg
 }
