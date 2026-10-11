@@ -137,14 +137,19 @@ func (c *Client) connectAndRegister(ctx context.Context, core Core, onAuthorizat
 		if reg.DisplayName != "" {
 			s.core.Name = reg.DisplayName
 		}
+		previous := *s.creds
 		s.creds.RegistryToken = reg.Token
 		s.creds.CoreKey = coreKey(s.core)
 		// As in node-roon-api, initial authorization automatically pairs this Core.
 		s.creds.PairedCoreID = s.core.ID
 		savedCore, savedCreds := s.core, *s.creds
 		s.mu.Unlock()
-		if err := store.Save(ctx, savedCore, savedCreds); err != nil {
-			return err
+		// Skip unchanged writes to spare SD cards on every reconnect. A failed
+		// save must not end an authorized session: kiosks may run read-only.
+		if !found || !sameCredentials(previous, savedCreds) {
+			if err := store.Save(ctx, savedCore, savedCreds); err != nil {
+				c.log.Warn("save Roon credentials failed; authorization will not survive a restart", "error", err)
+			}
 		}
 		select {
 		case registered <- struct{}{}:
@@ -155,7 +160,14 @@ func (c *Client) connectAndRegister(ctx context.Context, core Core, onAuthorizat
 	if err != nil {
 		return nil, err
 	}
-	prompt := time.NewTimer(time.Second)
+	// Roon sends nothing while approval is pending, so only elapsed time
+	// suggests it. A stored token normally registers at once; allow a slow
+	// Core (for example, one still starting) longer before asking the user.
+	promptDelay := unpairedPromptDelay
+	if creds.RegistryToken != "" {
+		promptDelay = pairedPromptDelay
+	}
+	prompt := time.NewTimer(promptDelay)
 	defer prompt.Stop()
 	for {
 		select {
@@ -175,6 +187,15 @@ func (c *Client) connectAndRegister(ctx context.Context, core Core, onAuthorizat
 			return s, nil
 		}
 	}
+}
+
+var (
+	unpairedPromptDelay = time.Second
+	pairedPromptDelay   = 10 * time.Second
+)
+
+func sameCredentials(a, b Credentials) bool {
+	return a.RegistryToken == b.RegistryToken && a.CoreKey == b.CoreKey && a.PairedCoreID == b.PairedCoreID
 }
 
 func (s *session) coreSnapshot() Core { s.mu.Lock(); defer s.mu.Unlock(); return s.core }

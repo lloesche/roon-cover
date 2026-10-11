@@ -206,3 +206,57 @@ func TestSessionMigratesOnlyMatchingExplicitAddressCredentials(t *testing.T) {
 		})
 	}
 }
+
+type failingSaveCredentials struct{ memoryCredentials }
+
+func (f *failingSaveCredentials) Save(context.Context, Core, Credentials) error {
+	return errors.New("read-only file system")
+}
+
+func TestSessionSurvivesCredentialSaveFailure(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	var connections, registrations atomic.Int32
+	core := sessionServer(t, ctx, 0, nil, &connections, &registrations)
+	client := NewClient(Config{}, WithCredentialStore(&failingSaveCredentials{}), WithLogger(slog.New(slog.NewTextHandler(io.Discard, nil))))
+	session, err := client.OpenSession(ctx, core, nil)
+	if err != nil {
+		t.Fatalf("unwritable credentials ended an authorized session: %v", err)
+	}
+	session.Close()
+}
+
+func TestSessionSkipsUnchangedCredentialSave(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	var connections, registrations atomic.Int32
+	core := sessionServer(t, ctx, 0, nil, &connections, &registrations)
+	store := &memoryCredentials{value: Credentials{CoreKey: "test-core", RegistryToken: "token", PairedCoreID: "test-core"}}
+	session, err := NewClient(Config{}, WithCredentialStore(store)).OpenSession(ctx, core, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	session.Close()
+	store.mu.Lock()
+	defer store.mu.Unlock()
+	if store.saves != 0 {
+		t.Fatalf("unchanged credentials were rewritten %d time(s)", store.saves)
+	}
+}
+
+func TestSessionStoredTokenToleratesSlowRegistration(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	var connections, registrations atomic.Int32
+	core := sessionServer(t, ctx, 1500*time.Millisecond, nil, &connections, &registrations)
+	store := &memoryCredentials{value: Credentials{CoreKey: "test-core", RegistryToken: "token", PairedCoreID: "test-core"}}
+	prompted := false
+	session, err := NewClient(Config{}, WithCredentialStore(store)).OpenSession(ctx, core, func() { prompted = true })
+	if err != nil {
+		t.Fatal(err)
+	}
+	session.Close()
+	if prompted {
+		t.Fatal("a slow Core asked an already paired kiosk for authorization")
+	}
+}
