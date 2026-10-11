@@ -31,6 +31,16 @@ func (t *textTransition) fadeIn(now time.Time) {
 	t.phase, t.from, t.start, t.entry = textPhaseFadeIn, 0, now, true
 }
 
+// show reveals navigation feedback immediately and restarts its expiry even
+// when the same name is selected again.
+func (t *textTransition) show(value string, now time.Time, hold time.Duration) {
+	t.value, t.target, t.requested = value, value, value
+	t.phase, t.entry = textPhaseNone, false
+	t.hold = hold
+	t.expires = time.Time{}
+	t.scheduleExpiry(now)
+}
+
 func (t *textTransition) phaseDuration() time.Duration {
 	if t.entry {
 		return t.duration
