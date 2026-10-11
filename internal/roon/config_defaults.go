@@ -2,7 +2,7 @@ package roon
 
 func applyConfigDefaults(cfg Config) Config {
 	if cfg.ExtensionID == "" {
-		cfg.ExtensionID = "com.lukaslosche.roon-cover"
+		cfg.ExtensionID = "roon-cover"
 	}
 	if cfg.DisplayName == "" {
 		cfg.DisplayName = "roon-cover"
