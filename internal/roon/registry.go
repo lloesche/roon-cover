@@ -120,6 +120,9 @@ func (c *Client) connectAndRegister(ctx context.Context, core Core, onAuthorizat
 		ProvidedServices: []string{svcPairing, svcPing}, Token: creds.RegistryToken,
 	}
 	registered := make(chan struct{}, 1)
+	// Only the ordered response handler accesses this persistence snapshot.
+	// Live pairing state can change even when saving to disk fails.
+	persisted, hasPersisted := creds, found
 	// Registration is a long-lived CONTINUE stream: COMPLETE Unregistered must
 	// invalidate the session even after initial authorization succeeds.
 	err = conn.Subscribe(ctx, svcRegistry+"/register", request, func(f *mooFrame) error {
@@ -137,7 +140,6 @@ func (c *Client) connectAndRegister(ctx context.Context, core Core, onAuthorizat
 		if reg.DisplayName != "" {
 			s.core.Name = reg.DisplayName
 		}
-		previous := *s.creds
 		s.creds.RegistryToken = reg.Token
 		s.creds.CoreKey = coreKey(s.core)
 		// As in node-roon-api, initial authorization automatically pairs this Core.
@@ -146,9 +148,11 @@ func (c *Client) connectAndRegister(ctx context.Context, core Core, onAuthorizat
 		s.mu.Unlock()
 		// Skip unchanged writes to spare SD cards on every reconnect. A failed
 		// save must not end an authorized session: kiosks may run read-only.
-		if !found || !sameCredentials(previous, savedCreds) {
+		if !hasPersisted || !sameCredentials(persisted, savedCreds) {
 			if err := store.Save(ctx, savedCore, savedCreds); err != nil {
-				c.log.Warn("save Roon credentials failed; authorization will not survive a restart", "error", err)
+				c.log.Warn("Couldn't save Roon credentials; approval may be required after a restart", "error", err)
+			} else {
+				persisted, hasPersisted = savedCreds, true
 			}
 		}
 		select {
@@ -164,7 +168,9 @@ func (c *Client) connectAndRegister(ctx context.Context, core Core, onAuthorizat
 	// suggests it. A stored token normally registers at once; allow a slow
 	// Core (for example, one still starting) longer before asking the user.
 	promptDelay := unpairedPromptDelay
-	if creds.RegistryToken != "" {
+	// The outgoing request is immutable; the live credentials are updated by
+	// the read loop as soon as registration succeeds.
+	if request.Token != "" {
 		promptDelay = pairedPromptDelay
 	}
 	prompt := time.NewTimer(promptDelay)
@@ -189,7 +195,7 @@ func (c *Client) connectAndRegister(ctx context.Context, core Core, onAuthorizat
 	}
 }
 
-var (
+const (
 	unpairedPromptDelay = time.Second
 	pairedPromptDelay   = 10 * time.Second
 )
