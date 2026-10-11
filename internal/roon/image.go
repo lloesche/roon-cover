@@ -9,7 +9,6 @@ import (
 	"net/http"
 	"net/url"
 	"strconv"
-	"time"
 )
 
 func (c *Client) FetchImage(ctx context.Context, core Core, key ImageKey, opt ImageFetchOptions) (bytes []byte, mimeType string, err error) {
@@ -41,8 +40,7 @@ func (c *Client) FetchImage(ctx context.Context, core Core, key ImageKey, opt Im
 		return nil, "", err
 	}
 
-	client := &http.Client{Timeout: 10 * time.Second}
-	resp, err := client.Do(req)
+	resp, err := c.imageClient.Do(req)
 	if err != nil {
 		return nil, "", err
 	}

@@ -1,4 +1,4 @@
-// Package app owns zone selection and desired scenes independently of SDL and CLI.
+// Package app owns zone selection and desired scenes independently of the renderer and CLI.
 package app
 
 import (
